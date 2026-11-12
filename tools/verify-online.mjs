@@ -168,5 +168,19 @@ pinger.handlePing({ t: 'pong', seq });
 check('a 40 ms round trip reads back as ~40 ms', Math.round(pinger.ping) === 40, `${pinger.ping} ms`);
 check('pong is not mistaken for game traffic', pinger.handlePing({ t: 'pong', seq }) === true);
 
+/* ------------------------------------- ping reaches the HUD from a message */
+// This is the user-facing feature: the number on screen must come from a real
+// round trip through the session's message path, not a local timer.
+const sessPing = new OnlineSession({});
+sessPing.net.joined = true;
+sessPing.net.channel = { send: () => undefined };
+sessPing._begin();
+sessPing.net.sendPing();
+const pendingSeq = sessPing.net._pingSeq;
+sessPing.net._pendingPings.set(pendingSeq, sessPing.net._pendingPings.get(pendingSeq) - 65);
+sessPing._onMessage({ t: 'pong', seq: pendingSeq, from: 'peer' });
+check('a pong updates the session ping used by the HUD', Math.round(sessPing.ping) === 65, `${sessPing.ping} ms`);
+check('ping/pong frames are not treated as game messages', sessPing.running === true);
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} online: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

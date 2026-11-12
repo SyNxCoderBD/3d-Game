@@ -180,12 +180,21 @@ export class NetClient {
       this.onStatus({ type: 'peer-left', id: key });
     });
 
+    this._channelAttempts = 0;
     ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
+        this._channelAttempts = 0;
         ch.track({ id: this.id, name: this.name, at: Date.now() }).catch(() => {});
         this.onStatus({ type: 'subscribed' });
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        this.onStatus({ type: 'reconnecting' });
+        this._channelAttempts = (this._channelAttempts || 0) + 1;
+        // Report the first failure straight away so the lobby can say
+        // "connecting…", then give up loudly: a player waiting on a code that
+        // will never connect is worse than an error message.
+        this.onStatus({
+          type: this._channelAttempts >= 4 ? 'connect-failed' : 'reconnecting',
+          attempts: this._channelAttempts,
+        });
       }
     });
     this.channel = ch;

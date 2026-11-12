@@ -757,6 +757,14 @@ async function doHost() {
           if (room.started) endOnlineMatch('HOST LEFT');
         }
         if (st.type === 'subscribed') setRoomError('');
+        if (st.type === 'reconnecting') setRoomError('CONNECTING TO THE SERVER…');
+        if (st.type === 'connect-failed') {
+          setRoomError('CANNOT REACH THE SERVER — CHECK YOUR CONNECTION OR FIREWALL');
+        }
+        if (st.type === 'reconnecting') setRoomError('CONNECTING TO THE SERVER…');
+        if (st.type === 'connect-failed') {
+          setRoomError('CANNOT REACH THE SERVER — CHECK YOUR CONNECTION OR FIREWALL');
+        }
       },
     });
     room.session = sess;
@@ -1481,6 +1489,12 @@ function updatePadStatus() {
   el.classList.toggle('ok', count > 0);
 }
 setInterval(updatePadStatus, 800);
+
+// The lobby re-renders on every poll (1.5 s), which is too coarse to watch the
+// ping settle. Tick the readout on its own so it feels live while waiting.
+setInterval(() => {
+  if (room.el?.classList.contains('show')) updatePingLine();
+}, 400);
 window.addEventListener('gamepadconnected', updatePadStatus);
 
 window.addEventListener('resize', () => {
