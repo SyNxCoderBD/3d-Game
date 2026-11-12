@@ -65,8 +65,11 @@ export class BotBrain {
     this.lastSeen = 0;          // grace period with a known target
     this.fireDiscipline = 0.6 + Math.random() * 0.7;
     // These are re-derived from skill every update; defaults describe skill 0.
-    this.reactionSkill = Math.max(0.32, 0.78 - skill * 0.32);
-    this.acquireRate = 2.1 + skill * 1.5;
+    // A weak bot is slow to notice you and slow to settle its aim. Scaled so
+    // that skill 0 is clearly beatable (over a second of reaction, a long
+    // settle) and skill 1 is sharp but still human.
+    this.reactionSkill = 1.35 - skill * 1.05;
+    this.acquireRate = 0.85 + skill * 2.6;
     this.burstMin = 0.16;
     this.burstMax = 0.16 + 0.26;
     this.recoilPause = 0;       // forced trigger release after a burst
@@ -143,7 +146,7 @@ export class BotBrain {
       if (best && best !== this.target) {
         // Fresh target: take a visible beat to react. Closing the distance
         // shortens it, so an ambush still feels dangerous.
-        this.reactionSkill = Math.max(0.32, 0.78 - this.skill * 0.32);
+        this.reactionSkill = 1.35 - this.skill * 1.05;
         this.reaction = this.reactionSkill;
         this.acquire = 0;
         this.fireDiscipline = 0.55 + Math.random() * 0.8;
@@ -196,16 +199,20 @@ export class BotBrain {
       // target, narrows as it settles, and opens up again while firing.
       const freshness = 1.55 - this.acquire * 1.05;
       const kick = this.recoilPause > 0 ? 1.35 : 1;
-      const drift = (0.34 - this.skill * 0.16) * freshness * kick;
+      // Aim wander. The old range (0.34 down to 0.18) was nearly flat, so a
+      // "weak" bot was almost as accurate as a strong one. Spread it properly.
+      const drift = (0.62 - this.skill * 0.46) * freshness * kick;
       // Low-frequency wander + per-frame jitter: reads as human aim, not noise.
       this.aimDrift += (Math.random() - 0.5) * dt * drift * 2.4;
       this.aimDrift *= Math.exp(-2.2 * dt);
       this.aimErrorVel += (Math.random() - 0.5) * dt * drift * 1.6;
       this.aimErrorVel *= Math.exp(-3.4 * dt);
-      this.aimError = clamp(this.aimError + this.aimErrorVel + this.aimDrift * dt, -0.042, 0.042);
+      const errorLimit = 0.085 - this.skill * 0.045;
+      this.aimError = clamp(this.aimError + this.aimErrorVel + this.aimDrift * dt,
+        -errorLimit, errorLimit);
     }
 
-    const turnRate = 2.1 + this.skill * 3.2;
+    const turnRate = 1.15 + this.skill * 4.2;
     const yawDelta = angleDelta(f.yaw, desiredYaw + this.aimError);
     const pitchDelta = clamp(desiredPitch - f.pitch, -0.5, 0.5);
 

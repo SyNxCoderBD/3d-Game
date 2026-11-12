@@ -279,8 +279,16 @@
     transform: translate(-50%, -50%);
     border-radius: 50%;
     border: 2px solid rgba(8, 12, 10, 0.95);
-    /* Everything outside the lens is blacked out, in any pane shape. */
-    box-shadow: inset 0 0 70px rgba(0,0,0,0.8), 0 0 0 200vmax #000;
+    /*
+     * Everything outside the lens is blacked out, and the inside is vignetted
+     * so the glass reads as glass rather than as a flat cut-out. The inner
+     * shadow is the falloff toward the tube wall; the second one is the
+     * slightly brighter rim a real eyepiece shows at the very edge.
+     */
+    box-shadow:
+      inset 0 0 16vh rgba(0, 0, 0, 0.55),
+      inset 0 0 2vh rgba(0, 0, 0, 0.85),
+      0 0 0 200vmax #000;
   }
   /*
    * The scope reticle. Both rings are centred on the pane, which is the one
@@ -289,22 +297,29 @@
    * pure light lines vanish over the sky, so each line is drawn twice: a wide
    * soft halo underneath and a thin bright core on top.
    */
+  /*
+   * The reticle is sized to the lens, not to the pane. Drawn full-height it
+   * ran out past the lens and into the blacked-out area, which looked like
+   * stray lines rather than like a sight picture.
+   */
   .scope-cross { position: absolute; pointer-events: none; }
   .scope-cross.v {
-    left: 50%; top: 50%; width: 3px; height: 100%;
+    left: 50%; top: 50%; width: 3px; height: min(64vh, 88%);
     transform: translate(-50%, -50%);
     background: linear-gradient(180deg,
       rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.55) 44%,
       transparent 44%, transparent 56%,
       rgba(0,0,0,0.55) 56%, rgba(0,0,0,0.55) 100%);
+    border-radius: 0;
   }
   .scope-cross.h {
-    left: 50%; top: 50%; width: 100%; height: 3px;
+    left: 50%; top: 50%; width: min(64vh, 88%); height: 3px;
     transform: translate(-50%, -50%);
     background: linear-gradient(90deg,
       rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.55) 44%,
       transparent 44%, transparent 56%,
       rgba(0,0,0,0.55) 56%, rgba(0,0,0,0.55) 100%);
+    border-radius: 0;
   }
   .scope-cross.v::after,
   .scope-cross.h::after {
@@ -329,7 +344,10 @@
   }
   .scope-label,
   .scope-mildots { z-index: 2; }
-  .scope-mildots { position: absolute; left: 50%; top: 62%; transform: translate(-50%, 0); display: flex; flex-direction: column; gap: 7vh; }
+  .scope-mildots {
+    position: absolute; left: 50%; top: 62%; transform: translate(-50%, 0);
+    display: flex; flex-direction: column; gap: min(5vh, 4vw);
+  }
   .scope-mildots i { width: 3px; height: 3px; background: rgba(12,18,14,0.8); border-radius: 50%; }
   .scope-mildots i:nth-child(odd) { transform: translateX(-16px); }
   .scope-mildots i:nth-child(even) { transform: translateX(13px); }
@@ -728,6 +746,16 @@
           <option value="balanced">BALANCED</option>
           <option value="low">LOW</option>
         </select>
+      </div>
+      <div class="pauseRow"><span>Bot difficulty</span>
+        <select id="optDifficulty">
+          <option value="easy" selected>EASY</option>
+          <option value="normal">NORMAL</option>
+          <option value="hard">HARD</option>
+        </select>
+      </div>
+      <div class="pauseRow"><span>Controller sensitivity</span>
+        <input type="range" id="optPadSens" min="20" max="200" step="5" value="75" />
       </div>
       <div class="pauseRow"><span>Controller rumble</span>
         <select id="optRumble">

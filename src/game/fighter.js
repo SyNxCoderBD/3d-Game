@@ -680,10 +680,18 @@ export class Fighter {
 
   updateViewmodel(dt) {
     const p = this.viewPivot;
+    // The gun is pulled in towards the eye as the player aims. It must stop
+    // short of the near plane (0.03 m) or its own geometry is clipped open and
+    // shows as a flat cross-section — and for a scoped sniper the viewmodel is
+    // hidden entirely (see below), so this end position only applies to the
+    // hip-fire and iron-sight weapons that stay visible.
+    // Keep this threshold in step with the HUD scope overlay (hud.js), or the
+    // gun disappears while the reticle is still hidden.
+    const scoped = this.weapon.kind === 'sniper' && this.aimT > 0.82;
     const target = _v1.set(
       lerp(0.21, 0.0, this.aimT),
       lerp(-0.20, -0.118, this.aimT) + Math.sin(this.bob) * 0.006 * this.bobWeight,
-      lerp(-0.38, -0.02, this.aimT)
+      lerp(-0.38, -0.16, this.aimT)
     );
     p.position.lerp(target, 1 - Math.exp(-16 * dt));
     p.rotation.y = lerp(-0.06, 0, this.aimT) - clamp(this.lookKick * 0.12, -0.12, 0.12);
@@ -694,7 +702,19 @@ export class Fighter {
     p.position.z += kick * 0.02;
 
     if (this.viewGun) {
-      const scoped = this.weapon.kind === 'sniper' && this.aimT > 0.9;
+      /*
+       * Scoping hides the whole viewmodel, not just the barrel.
+       *
+       * The sniper's scope carries a bright emissive lens cap 0.25 m from the
+       * eye. With the scope's 26 deg FOV that cap spans half the pane, so
+       * "aiming down sights" put a hard-edged teal polygon over the exact spot
+       * the player was trying to look at — which reads as a graphics glitch,
+       * because it is one. Hide the gun instead and let the HTML scope reticle
+       * be the only thing drawn over the world.
+       *
+       * The hand meshes are part of the same viewmodel, so they hide with it;
+       * that is the normal look for a scoped view.
+       */
       this.viewGun.visible = !scoped;
     }
 

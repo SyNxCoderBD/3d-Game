@@ -313,6 +313,10 @@ function buildSniper() {
   // big scope
   c(g, 0.034, 0.034, 0.26, M.steel, [0, 0.115, -0.06], [Math.PI / 2, 0, 0], 16);
   c(g, 0.042, 0.034, 0.05, M.steel, [0, 0.115, -0.20], [Math.PI / 2, 0, 0], 16);
+  // Bright emissive lens cap, aimed straight back at the eye. Scoping down
+  // sights must hide the whole viewmodel: at the 26 deg sniper FOV this cap is
+  // only 0.25 m away and 6.4 cm across, so it covers half the pane with a
+  // hard-edged teal polygon that reads as a rendering glitch.
   c(g, 0.032, 0.032, 0.008, M.glass, [0, 0.115, -0.226], [Math.PI / 2, 0, 0], 16);
   b(g, 0.024, 0.03, 0.02, M.steel, [0, 0.115, 0.07], null, 0.004);
   b(g, 0.022, 0.05, 0.02, M.steel, [0, 0.075, -0.06], null, 0.004);           // mount front

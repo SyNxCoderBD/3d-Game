@@ -404,6 +404,78 @@ async function main() {
     });
   }
 
+  /* -------------------------------------------------------------- sniper ADS */
+
+  // The teal disc over the aim point was the sniper viewmodel's emissive lens
+  // cap. At the scope's 26 deg FOV it sat 0.25 m from the eye and spanned half
+  // the pane. The viewmodel must be hidden while scoped, and the hidden state
+  // must line up with when the HUD shows the scope overlay, or there is a gap
+  // with neither gun nor reticle.
+  {
+    const { readFileSync } = await import('node:fs');
+    const fighter = readFileSync(new URL('../src/game/fighter.js', import.meta.url), 'utf8');
+    const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
+    const weapons = readFileSync(new URL('../src/game/weapons.js', import.meta.url), 'utf8');
+
+    check('the viewmodel is hidden while scoped', () => {
+      const fn = fighter.slice(fighter.indexOf('updateViewmodel(dt) {'), fighter.indexOf('updateViewmodel(dt) {') + 3000);
+      assert.ok(/viewGun\.visible\s*=\s*!scoped/.test(fn), 'the gun must hide when scoped');
+    });
+
+    check('the scoped threshold matches the HUD overlay', () => {
+      const fn = fighter.slice(fighter.indexOf('updateViewmodel(dt) {'), fighter.indexOf('updateViewmodel(dt) {') + 3000);
+      const a = fn.match(/aimT > ([\d.]+)/);
+      const b = hud.match(/aimT > ([\d.]+)/);
+      assert.ok(a && b, 'both thresholds must be expressible');
+      assert.equal(a[1], b[1], `fighter ${a?.[1]} vs hud ${b?.[1]}`);
+    });
+
+    check('the near plane is never entered by the viewmodel', () => {
+      const fn = fighter.slice(fighter.indexOf('updateViewmodel(dt) {'), fighter.indexOf('updateViewmodel(dt) {') + 3000);
+      // z must not be pulled closer than the 0.03 m near plane.
+      const z = fn.match(/lerp\(-0\.38,\s*(-?[\d.]+),\s*this\.aimT\)/);
+      assert.ok(z, 'viewmodel z lerp must be findable');
+      assert.ok(Math.abs(Number(z[1])) > 0.03, `ends at z=${z[1]}, inside the near plane`);
+    });
+
+    check('the scope lens is emissive enough to need hiding', () => {
+      // Guards the reason for the fix: if the lens is ever toned down this
+      // assumption should be revisited rather than silently kept.
+      assert.ok(/emissiveIntensity:\s*2\.2/.test(weapons), 'lens material changed - recheck the ADS fix');
+    });
+  }
+
+  /* --------------------------------------------------------- bot difficulty */
+
+  {
+    const { readFileSync } = await import('node:fs');
+    const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+    const ai = readFileSync(new URL('../src/game/ai.js', import.meta.url), 'utf8');
+
+    check('bot difficulty is a setting with an easy default', () => {
+      assert.ok(/botDifficulty:\s*'easy'/.test(main), 'easy must be the default');
+      const bands = main.slice(main.indexOf('const BOT_SKILL'), main.indexOf('const BOT_SKILL') + 300);
+      assert.ok(/easy:\s*\[[\d.]+, [\d.]+\]/.test(bands), 'easy band must be defined');
+      const easy = bands.match(/easy:\s*\[([\d.]+), ([\d.]+)\]/);
+      assert.ok(Number(easy[2]) <= 0.35, `easy tops out at ${easy[2]}, still too sharp`);
+    });
+
+    check('low-skill bots are actually weak', () => {
+      // Reaction and settle time must both get materially worse at skill 0.
+      const react = ai.match(/reactionSkill = ([\d.]+) - skill \* ([\d.]+)/);
+      assert.ok(react, 'reaction formula must be present');
+      const atZero = Number(react[1]);
+      const atOne = Number(react[1]) - Number(react[2]);
+      assert.ok(atZero >= 1.0, `a skill-0 bot reacts in only ${atZero}s`);
+      assert.ok(atOne <= 0.5, `a skill-1 bot reacts in ${atOne}s, too slow to be hard`);
+    });
+
+    check('controller sensitivity is configurable', () => {
+      assert.ok(/padSensitivity/.test(main), 'the setting must exist');
+      assert.ok(/applyPadSensitivity/.test(main), 'and be applied to live pads');
+    });
+  }
+
   /* ------------------------------------------------------------- lobby hint */
 
   // The guest's lobby must stop saying "waiting" the moment the host starts.

@@ -214,6 +214,13 @@ const settings = {
   quality: 'auto',
   rumble: true,
   playerName: '',
+  // How hard the bots are. 'easy' is the default: bot practice exists to learn
+  // the game, and the previous fixed 0.35-0.85 spread was punishing enough that
+  // a new player could not stay alive long enough to learn anything.
+  botDifficulty: 'easy',
+  // Look speed multiplier for a controller, 0.4-2.0. Stick look is applied
+  // per-frame, so this scales that directly.
+  padSensitivity: 0.75,
 };
 
 try {
@@ -224,6 +231,16 @@ try {
 function saveSettings() {
   try { localStorage.setItem('aetheris.settings', JSON.stringify(settings)); } catch (_) { /* ignore */ }
 }
+
+/*
+ * Bot skill bands, 0..1. 'easy' has to be genuinely forgiving: a bot that
+ * lands most of its shots at range teaches nothing except frustration.
+ */
+const BOT_SKILL = {
+  easy: [0.05, 0.30],
+  normal: [0.28, 0.60],
+  hard: [0.55, 0.92],
+};
 
 const game = {
   mode: null,             // 'solo' | 'duo' | 'online'
@@ -307,6 +324,9 @@ function clearMatch() {
 // it to decide whether aim assist applies. Declaring it inside startMatch()
 // made those call sites throw a ReferenceError on the first frame of a match.
 let p1pad = null;
+
+// Base stick look rate before the player's sensitivity multiplier is applied.
+const PAD_LOOK_BASE = 3.0;
 
 function wireFighter(f, idx) {
   const match = game.match;
@@ -441,7 +461,9 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
       camera: game.cam2, bodyLayer: 2, viewLayer: 3,
       palette: 'p2', spawnPoints: game.spawnPoints,
     });
-    const pad = new GamepadInput(0);
+    const pad = new GamepadInput(0, {
+      lookSpeed: PAD_LOOK_BASE * Math.max(0.2, Math.min(2, settings.padSensitivity ?? 0.75)),
+    });
     if (pad.connected) {
       game.input2 = pad;
       p2.inputSource = 'pad';
@@ -542,7 +564,9 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
    * replugging anything. The mouse still owns looking while it is being moved.
    */
   const kbm = new KeyboardMouseInput(canvas);
-  p1pad = new GamepadInput(0);
+  p1pad = new GamepadInput(0, {
+    lookSpeed: PAD_LOOK_BASE * Math.max(0.2, Math.min(2, settings.padSensitivity ?? 0.75)),
+  });
   game.input1 = new HybridInput(kbm, p1pad);
   game.input1.enabled = true;
   game.input1.onLockLost = () => {
@@ -585,7 +609,10 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
       });
       game.fighters.push(bot);
       game.bots.push(bot);
-      game.brains.push(new BotBrain(bot, game.spawnPoints, 0.35 + (i / botCount) * 0.5));
+      // Skill spread within a match: the first bot is a warm-up, the last is the
+      // hardest. The band moves with the chosen difficulty.
+      const [lo, hi] = BOT_SKILL[settings.botDifficulty] || BOT_SKILL.easy;
+      game.brains.push(new BotBrain(bot, game.spawnPoints, lo + (i / Math.max(1, botCount)) * (hi - lo)));
     }
   }
 
@@ -1666,9 +1693,37 @@ $('optRumble').addEventListener('change', (e) => {
   settings.rumble = e.target.value === 'on';
   saveSettings();
 });
+$('optDifficulty').addEventListener('change', (e) => {
+  // Applies to the next match; the current one keeps the skill it started with.
+  settings.botDifficulty = e.target.value;
+  saveSettings();
+});
+$('optPadSens').addEventListener('input', (e) => {
+  settings.padSensitivity = Number(e.target.value) / 100;
+  applyPadSensitivity();
+  saveSettings();
+});
+
+/**
+ * Push the configured look speed onto every controller in use. The value is a
+ * multiplier on the base rate, so 0.75 means a quarter slower than default and
+ * the range runs from very slow to the old maximum.
+ */
+function applyPadSensitivity() {
+  const mult = Math.max(0.2, Math.min(2, settings.padSensitivity ?? 0.75));
+  try {
+    if (p1pad) p1pad.lookSpeed = PAD_LOOK_BASE * mult;
+    if (game.input2?.pad) game.input2.pad.lookSpeed = PAD_LOOK_BASE * mult;
+  } catch (_) {
+    /* no pad to configure */
+  }
+}
 $('optVolume').value = String(Math.round(settings.volume * 100));
 $('optQuality').value = settings.quality;
 $('optRumble').value = settings.rumble ? 'on' : 'off';
+$('optDifficulty').value = settings.botDifficulty || 'easy';
+$('optPadSens').value = String(Math.round((settings.padSensitivity ?? 0.75) * 100));
+applyPadSensitivity();
 
 canvas.addEventListener('click', () => {
   if (game.running && !game.paused && game.input1 && !game.input1.locked) {
