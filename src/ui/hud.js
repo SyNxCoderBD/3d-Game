@@ -63,6 +63,7 @@ const PANE_TEMPLATE = `
     <span class="pname"></span>
     <span class="score">0</span>
     <span class="clock"></span>
+    <span class="ping"></span>
   </div>
   <div class="streak"></div>
   <div class="minimap">
@@ -137,6 +138,7 @@ export class Hud {
         scopeLabel: el.querySelector('.scope-label'),
         dmgDirs: el.querySelector('.dmg-dirs'),
         clock: el.querySelector('.clock'),
+        ping: el.querySelector('.ping'),
         streakEl: el.querySelector('.streak'),
         streakTimer: 0,
         lastSlot: -1,
@@ -414,6 +416,20 @@ export class Hud {
     // Hide the marker entirely while the reticle is already red on that enemy:
     // the outline and red crosshair say it better than a badge can.
     if (self.onTarget === target && !offscreen) marker.classList.remove('show');
+  }
+
+  /** Network latency readout. Pass null to hide it (offline modes). */
+  setPing(ms) {
+    for (const pane of this.panes) {
+      if (!pane.ping) continue;
+      if (ms === null || ms === undefined) {
+        pane.ping.textContent = '';
+        pane.ping.className = 'ping';
+        continue;
+      }
+      pane.ping.textContent = `${Math.round(ms)} ms`;
+      pane.ping.className = 'ping ' + (ms < 80 ? 'good' : ms < 160 ? 'ok' : 'bad');
+    }
   }
 
   setClock(text) {

@@ -4,8 +4,10 @@ export default defineConfig({
   base: './',
   server: {
     host: '0.0.0.0',
+    // 5173 is the usual port; if an older build of the game is already holding
+    // it, step to the next free one instead of refusing to start.
     port: 5173,
-    strictPort: true,
+    strictPort: false,
     allowedHosts: true,
   },
   preview: {

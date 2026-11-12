@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createWeaponModel, WEAPON_IDS } from './weapons.js';
+import { createRandom } from '../util/math.js';
 
 const RING_GEO = new THREE.RingGeometry(0.5, 0.72, 26);
 const BEAM_GEO = new THREE.CylinderGeometry(0.34, 0.5, 2.6, 10, 1, true);
@@ -94,7 +95,13 @@ function buildArmor() {
 const WEAPON_TYPES = ['rifle', 'smg', 'shotgun', 'sniper'];
 
 export class Pickups {
-  constructor(scene, spots) {
+  /**
+   * `seed` makes the layout identical on every client: in an online duel both
+   * players must find the same crate in the same place, or one of them fights
+   * for pickups that do not exist on the other's screen.
+   */
+  constructor(scene, spots, seed = 0) {
+    const rand = seed ? createRandom(seed) : Math.random;
     this.scene = scene;
     this.items = [];
     this.group = new THREE.Group();
@@ -103,19 +110,24 @@ export class Pickups {
     this.time = 0;
     this.onCollect = null;
 
-    const types = ['medkit', 'medkit', 'ammo', 'ammo', 'ammo', 'armor'];
+    // Ammo is the most common pickup on the island: running dry should send
+    // you to the next crate, not across the map. Roughly one in two spots is
+    // an ammo box, and every ammo pickup restocks the weapon in your hands.
     const list = [];
     for (const spot of spots) {
-      const roll = Math.random();
+      const roll = rand();
       let type;
-      if (roll < 0.4) type = WEAPON_TYPES[(Math.random() * WEAPON_TYPES.length) | 0];
-      else if (roll < 0.62) type = 'medkit';
-      else if (roll < 0.86) type = 'ammo';
+      if (roll < 0.22) type = WEAPON_TYPES[(rand() * WEAPON_TYPES.length) | 0];
+      else if (roll < 0.42) type = 'medkit';
+      else if (roll < 0.94) type = 'ammo';
       else type = 'armor';
       list.push({ type, spot });
     }
-    // Guarantee a couple of each essential type near the middle.
     list.forEach((entry) => this.addItem(entry.type, entry.spot));
+
+    // Ammo crates come back faster than anything else, so a firefight never
+    // leaves a corner of the map permanently dry.
+    this.respawnTime = { ammo: 9, medkit: 16, armor: 22, weapon: 20 };
   }
 
   /**
@@ -233,7 +245,7 @@ export class Pickups {
             if (item.drop) {
               this.removeItem(item, i);
             } else {
-              item.respawn = 16 + Math.random() * 8;
+              item.respawn = (this.respawnTime?.[item.type] ?? 16) + Math.random() * 6;
             }
             this.onCollect?.(f, item.type);
             break;
@@ -257,6 +269,12 @@ export class Pickups {
         return true;
       case 'ammo':
         fighter.addAmmo(60);
+        // Top the magazine up too: running dry mid-fight and finding a crate
+        // only to still have an empty gun is the worst version of this.
+        fighter.slotData.ammo = Math.max(
+          fighter.slotData.ammo,
+          Math.ceil(fighter.weapon.magSize * 0.5)
+        );
         return true;
       case 'armor':
         if (fighter.armor >= 100) return false;

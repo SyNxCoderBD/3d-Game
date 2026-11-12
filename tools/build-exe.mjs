@@ -71,6 +71,66 @@ function inlineBundle(html) {
   return { html: out, assets };
 }
 
+/**
+ * Compile launcher/localserver.c natively (the same source the Windows build
+ * embeds), serve the actual payload through it, and check we get it back byte
+ * for byte. Catches a broken server before it becomes a broken .exe.
+ */
+async function verifyLocalServer(html) {
+  const { execFileSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'aetheris-srv-'));
+  const page = path.join(tmp, 'index.html');
+  await fsp.writeFile(page, html, 'utf8');
+
+  const harness = path.join(tmp, 'harness.c');
+  await fsp.writeFile(harness, `
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "localserver.c"
+int main(int argc, char **argv) {
+  local_server srv;
+  if (!srv_start(&srv, argv[1])) { fprintf(stderr, "%s", srv.error); return 1; }
+  printf("%d", srv.port);
+  fflush(stdout);
+  sleep(20);
+  srv_stop(&srv);
+  return 0;
+}
+`, 'utf8');
+
+  const bin = path.join(tmp, 'srv');
+  execFileSync('cc', ['-O2', '-w', '-I', path.join(ROOT, 'launcher'), '-o', bin, harness], {
+    stdio: 'pipe',
+  });
+
+  const child = (await import('node:child_process')).spawn(bin, [page], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const port = await new Promise((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error('loopback server did not report a port')), 8000);
+      child.stdout.on('data', (d) => {
+        out += d.toString();
+        if (/^\d+$/.test(out.trim())) { clearTimeout(timer); resolve(parseInt(out.trim(), 10)); }
+      });
+      child.on('error', reject);
+    });
+
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    if (!res.ok) throw new Error(`loopback server answered ${res.status}`);
+    const got = await res.text();
+    if (got !== html) {
+      throw new Error(`loopback server returned ${got.length} bytes, expected ${html.length}`);
+    }
+    console.log(`  served ${(got.length / 1024).toFixed(0)} KB over 127.0.0.1:${port} ✓`);
+  } finally {
+    child.kill('SIGKILL');
+    await fsp.rm(tmp, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   console.log('▸ building web bundle…');
   await build({ root: ROOT, logLevel: 'warn' });
@@ -83,6 +143,12 @@ async function main() {
 
   await fsp.mkdir(BUILD, { recursive: true });
   await fsp.mkdir(RELEASE, { recursive: true });
+
+  // The launcher now serves the payload over loopback HTTP, which is what makes
+  // online play work from a real origin. Verify that server before shipping:
+  // compile it natively and fetch the real payload through it.
+  console.log('▸ verifying the loopback server…');
+  await verifyLocalServer(html);
 
   const zig = findZig();
   const stub = path.join(BUILD, 'launcher.exe');
@@ -98,6 +164,8 @@ async function main() {
       '-Wl,-s',
       '-o', stub,
       path.join(ROOT, 'launcher', 'launcher.c'),
+      // Winsock is needed by the loopback server that hosts the payload.
+      '-lws2_32',
     ],
     { stdio: 'inherit', cwd: ROOT }
   );
@@ -114,8 +182,32 @@ async function main() {
   console.log(`▸ wrote ${path.relative(ROOT, exePath)} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
 
   // Also drop the standalone html next to it: same build, playable in any browser.
-  await fsp.writeFile(path.join(RELEASE, 'Aetheris.html'), html);
+  const htmlPath = path.join(RELEASE, 'Aetheris.html');
+  await fsp.writeFile(htmlPath, html);
   console.log('▸ wrote release/Aetheris.html');
+
+  // Re-read what we shipped and prove the payload survived the append intact,
+  // and that the launcher really is going to serve it over loopback rather
+  // than fall back to file://. A trailer mistake here produces an .exe that is
+  // only broken on the user's machine.
+  const shipped = await fsp.readFile(exePath);
+  const trailerAt = shipped.length - 24;
+  if (shipped.subarray(trailerAt, trailerAt + 16).toString('ascii') !== MAGIC) {
+    throw new Error('payload trailer magic is missing from the exe');
+  }
+  const declared = Number(shipped.readBigUInt64LE(trailerAt + 16));
+  if (declared !== payload.length) {
+    throw new Error(`trailer declares ${declared} bytes, payload is ${payload.length}`);
+  }
+  const embedded = shipped.subarray(trailerAt - declared, trailerAt);
+  if (!embedded.equals(payload)) throw new Error('embedded payload does not match the built html');
+
+  const stubBytes2 = shipped.subarray(0, shipped.length - declared - 24);
+  const wide = (t) => Buffer.from(t, 'utf16le');
+  if (!stubBytes2.includes(wide('http://127.0.0.1:'))) {
+    throw new Error('launcher does not serve over loopback — online play would use a file:// origin');
+  }
+  console.log(`  exe verified: payload ${(declared / 1024).toFixed(0)} KB intact, loopback server present ✓`);
 }
 
 main().catch((err) => {

@@ -59,8 +59,9 @@ const listeners = new Map();
 class El {
   constructor(tag = 'div') {
     this.tagName = tag.toUpperCase();
-    this.id = '';
+    this._id = '';
     this.children = [];
+    this._listenerTypes = new Set();
     this.classList = new ClassList(this);
     this.style = {};
     this.textContent = '';
@@ -71,6 +72,22 @@ class El {
     this.clientWidth = 1600;
     this.parentNode = null;
     this.tagMap = new Map();
+  }
+  get id() { return this._id; }
+  set id(v) {
+    this._id = v;
+    // Re-key any listeners registered before the element had its id, which is
+    // the normal case for elements declared in a template.
+    if (this._listenerTypes.size) {
+      for (const type of this._listenerTypes) {
+        const stale = listeners.get(this.tagName + ':' + type);
+        if (!stale) continue;
+        const key = v + ':' + type;
+        const existing = listeners.get(key) || [];
+        listeners.set(key, [...existing, ...stale]);
+        listeners.delete(this.tagName + ':' + type);
+      }
+    }
   }
   set className(v) {
     this.classList.set = new Set(String(v).split(/\s+/).filter(Boolean));
@@ -109,6 +126,7 @@ class El {
   }
   querySelectorAll() { return []; }
   addEventListener(type, cb) {
+    this._listenerTypes.add(type);
     const key = (this.id || this.tagName) + ':' + type;
     if (!listeners.has(key)) listeners.set(key, []);
     listeners.get(key).push(cb);
@@ -130,6 +148,18 @@ function el(id, tag) {
   if (!e) { e = new El(tag); e.id = id; byId.set(id, e); }
   return e;
 }
+// Elements the bundle binds handlers to at load time must exist with their id
+// BEFORE the bundle runs, or every handler lands on the generic 'DIV:click'
+// key and no button works. The real page has them in the markup; this stub has
+// to be told.
+for (const id of ['btnSolo', 'btnDuo', 'btnOnline', 'btnQuit', 'btnRematch',
+                  'btnVictoryMenu', 'btnPause', 'btnResume', 'btnHost', 'btnJoin',
+                  'btnStartOnline', 'btnRoomBack', 'btnCopyCode', 'playerName',
+                  'roomCode', 'room', 'roomChooser', 'roomLobby', 'roomRoster',
+                  'roomCodeValue', 'roomPingLine', 'roomLatencyHint', 'roomHint',
+                  'roomError', 'roomKills', 'pause', 'menu', 'victory', 'loader',
+                  'killLimit', 'optVolume', 'optQuality', 'optRumble',
+                  'hudRoot', 'fps', 'victoryBody']) el(id);
 
 // Elements referenced by main.js
 for (const id of [
@@ -325,6 +355,11 @@ function inspectLayers(obj, layer) {
   return ok;
 }
 
+function findPing(a) {
+  const pane = a.hud?.panes?.[0];
+  return pane?.ping || null;
+}
+
 let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => {
   if (cond) { pass++; console.log(`  ✓ ${name}${extra ? ' — ' + extra : ''}`); }
@@ -517,6 +552,88 @@ if (api) {
   check('rematch resets scores', api.game.locals[0].kills === 0, `${api.game.locals[0].kills} kills`);
   check('no exceptions from endcard', errors.length === 0, errors.slice(0, 1).join(''));
 }
+
+console.log('\n▸ online room screen');
+// Back to the menu, then open the room overlay. No network is touched here:
+// this checks that the screen exists, opens, gates its buttons and closes.
+click(el('btnQuit'));
+await runFrames(2, 5);
+if (el('pause').classList.contains('show')) { click(el('btnQuit')); await runFrames(2, 5); }
+click(el('btnOnline'));
+await runFrames(2, 5);
+check('room overlay opens', el('room').classList.contains('show'));
+check('menu hides behind it', !el('menu').classList.contains('show'));
+check('host button starts disabled without a name', el('btnHost').disabled === true);
+check('join button starts disabled', el('btnJoin').disabled === true);
+
+// Typing a name should enable hosting.
+el('playerName').value = 'TESTER';
+const nameInput = listeners.get('playerName:input') || [];
+for (const cb of nameInput) cb({ target: el('playerName'), stopPropagation() {} });
+check('naming yourself enables create-room', el('btnHost').disabled === false);
+
+// A code is required to join.
+el('roomCode').value = 'ABC12';
+const codeInput = listeners.get('roomCode:input') || [];
+for (const cb of codeInput) cb({ target: el('roomCode'), stopPropagation() {} });
+check('entering a code enables join', el('btnJoin').disabled === false);
+
+// Code input is sanitised to the room-code alphabet.
+el('roomCode').value = 'ab-c9!';
+for (const cb of codeInput) cb({ target: el('roomCode'), stopPropagation() {} });
+check('room code is upper-cased and filtered', el('roomCode').value === 'ABC9', el('roomCode').value);
+
+click(el('btnRoomBack'));
+await runFrames(2, 5);
+check('back returns to the menu', el('menu').classList.contains('show') && !el('room').classList.contains('show'));
+
+console.log('\n▸ online match (both sides local)');
+click(el('btnSolo'));
+await runFrames(3, 5);
+click(el('btnQuit'));
+await runFrames(2, 5);
+if (el('pause').classList.contains('show')) { click(el('btnQuit')); await runFrames(2, 5); }
+
+// Start an online duel without a socket: the session is faked so the mode can
+// be driven end to end. This is the wiring that would otherwise only be
+// exercised on two real machines at once.
+const fakeNet = {
+  id: 'LOCAL-ID', role: 'host', joined: false,
+  isHost: true, code: 'TEST1', ping: 42,
+  onLobby: null, onMessage: null, onStatus: null,
+  send() { return undefined; }, close() {},
+  broadcast() {}, sendInput() {}, sendSnapshot() {}, leave: async () => {},
+  channel: null,
+};
+const OnlineSessionMod = await import(path.join(ROOT, 'src/net/session.js'));
+const fakeSession = new OnlineSessionMod.OnlineSession({});
+fakeSession.net = fakeNet;
+fakeSession.localId = 'LOCAL-ID';
+api.game.online = fakeSession;
+
+api.startMatch('online', 0, 15);
+await runFrames(4, 6);
+check('online match has exactly one local soldier', api.game.locals.length === 1, `${api.game.locals.length}`);
+check('and one remote soldier', api.game.fighters.length === 2, `${api.game.fighters.length}`);
+check('HUD shows a single pane (not split screen)', el('hudRoot').children.length === 1, `${el('hudRoot').children.length}`);
+const meSpawn = api.game.locals[0].position;
+const themSpawn = api.game.fighters.find((f) => f !== api.game.locals[0]).position;
+check('players spawn apart', meSpawn.distanceTo(themSpawn) > 1, `${meSpawn.distanceTo(themSpawn).toFixed(1)} m`);
+check('spawns are finite', Number.isFinite(meSpawn.x + meSpawn.z + themSpawn.x + themSpawn.z));
+
+const pingEl = findPing(api);
+check('HUD exposes a ping readout', !!pingEl);
+api.hud.setPing(42);
+check('ping renders as a number with ms', pingEl && pingEl.textContent === '42 ms', pingEl ? JSON.stringify(pingEl.textContent) : 'none');
+check('good latency gets the good class', pingEl && pingEl.className === 'ping good', pingEl ? pingEl.className : '');
+api.hud.setPing(200);
+check('bad latency gets the bad class', pingEl && pingEl.className === 'ping bad', pingEl ? pingEl.className : '');
+api.hud.setPing(null);
+check('offline hides the readout', pingEl && pingEl.textContent === '', JSON.stringify(pingEl?.textContent));
+
+await runFrames(40, 6);
+check('online match simulates without exceptions', errors.length === 0, errors.slice(0, 1).join(''));
+check('online match keeps a finite position', Number.isFinite(api.game.locals[0].position.x));
 
 // sanity: no NaN leaked into the scene graph
 let nanObjects = 0;

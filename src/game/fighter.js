@@ -88,6 +88,8 @@ export class Fighter {
     this.regenDelay = 0;
     this.regenT = 0;
     this.onTarget = null;
+    this._targetYaw = null;
+    this._targetPitch = null;
     this.hitFlash = 0;
     this.lastHitBy = null;
 
@@ -567,6 +569,37 @@ export class Fighter {
     // Is an enemy under the reticle? Drives the red crosshair and the body
     // outline. Cheap: one sphere/box test per living opponent, no raycast.
     this.onTarget = this.findReticleTarget(ctx.fighters, ctx?.effects?.world);
+  }
+
+  /**
+   * Online guest: drive the *visuals* of a body whose position came from the
+   * network. No physics, no input — just the character rig so remote bodies
+   * walk, aim and fall over smoothly between snapshots.
+   */
+  updateVisualOnly(dt) {
+    if (this._targetYaw !== undefined && this._targetYaw !== null) {
+      // Ease toward the interpolated yaw so 20 Hz snapshots look like 60 Hz.
+      let d = this._targetYaw - this.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      this.yaw += d * Math.min(1, dt * 16);
+      this.pitch += ((this._targetPitch ?? this.pitch) - this.pitch) * Math.min(1, dt * 16);
+    }
+    this.grounded = true;
+    this.bodyAnchor.position.copy(this.position);
+    this.bodyAnchor.rotation.y = this.yaw;
+    this.bodyAnchor.updateMatrixWorld(true);
+    const hands = this._hands
+      ? { grip: this._hands.grip.getWorldPosition(_v1), foregrip: this._hands.foregrip.getWorldPosition(_v2) }
+      : null;
+    animateCharacter(this.rig, {
+      speed: this.speed || 0,
+      grounded: true,
+      aiming: (this.aimT || 0) > 0.35,
+      aimPitch: this.pitch,
+      crouch: this.crouching,
+      dead: !this.alive,
+      hands: hands ? { grip: hands.grip, foregrip: hands.foregrip, pitch: this.pitch } : null,
+    }, dt);
   }
 
   /**

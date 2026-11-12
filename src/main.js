@@ -7,13 +7,14 @@ import { createWater } from './world/water.js';
 import { createGrass, createProps } from './world/vegetation.js';
 import { createMotes } from './world/particles.js';
 import { Effects } from './game/combat.js';
-import { Fighter } from './game/fighter.js';
+import { Fighter, REGEN_DELAY } from './game/fighter.js';
 import { BotBrain } from './game/ai.js';
 import { Pickups } from './game/pickups.js';
 import { KeyboardMouseInput, GamepadInput, KeyboardSecondInput } from './game/input.js';
 import { Match } from './game/match.js';
 import { WorldColliders } from './game/colliders.js';
 import { TargetOutline } from './game/outline.js';
+import { OnlineSession } from './net/session.js';
 import { Sfx } from './audio/sfx.js';
 import { WEAPONS } from './game/weapons.js';
 import { buildSpawnPoints, buildPickupSpots } from './game/spawns.js';
@@ -165,6 +166,7 @@ const settings = {
   volume: 0.9,
   quality: 'auto',
   rumble: true,
+  playerName: '',
 };
 
 try {
@@ -177,7 +179,7 @@ function saveSettings() {
 }
 
 const game = {
-  mode: null,             // 'solo' | 'duo'
+  mode: null,             // 'solo' | 'duo' | 'online'
   fighters: [],
   locals: [],
   bots: [],
@@ -197,6 +199,8 @@ const game = {
   match: null,
   spectate: [null, null],
   botCount: 4,
+  online: null,           // OnlineSession while in a room
+  remoteInputs: new Map(),
 };
 
 const ambience = new Ambience();
@@ -215,8 +219,8 @@ function makeCamera() {
 function createMatchFor(mode, killLimit) {
   const match = new Match({
     mode,
-    killLimit: mode === 'duo' ? killLimit : 0,
-    timeLimit: mode === 'duo' ? 420 : 0,
+    killLimit: mode === 'duo' || mode === 'online' ? killLimit : 0,
+    timeLimit: mode === 'duo' || mode === 'online' ? 420 : 0,
   });
   return match;
 }
@@ -244,6 +248,8 @@ function clearMatch() {
   game.input1 = null;
   game.input2 = null;
   game.match = null;
+  game.remoteInputs = new Map();
+  game.ping = null;
   if (effects) effects.clear?.();
   hud.destroy();
 }
@@ -289,7 +295,10 @@ function wireFighter(f, idx) {
   };
 
   f.onDeath = (killer) => {
-    const res = match ? match.kill(killer, f) : null;
+    // Online: the host already scored this kill and decided the winner, so the
+    // guest replays the feedback only. Killing it twice would desync the score.
+    const authoritative = game.mode === 'online' && game.online && !game.online.isHost;
+    const res = (match && !authoritative) ? match.kill(killer, f) : null;
     // Leave the victim's gun behind as transient loot.
     if (game.pickups && f.slots[f.slot]) game.pickups.dropFrom(f);
     const local = game.locals.includes(f);
@@ -325,8 +334,15 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
   game.match = createMatchFor(mode, killLimit);
   game.spawnPoints = buildSpawnPoints(mode === 'duo' ? 16 : 14);
 
-  const spots = buildPickupSpots(mode === 'duo' ? 26 : 22);
-  game.pickups = new Pickups(scene, spots);
+  // Online duels use the room seed so both clients build the same crate
+  // layout; offline matches stay unseeded so every run feels fresh.
+  const onlineSeed = mode === 'online' && game.online ? (game.online.seed >>> 0) : 0;
+  const spots = buildPickupSpots(
+    mode === 'duo' || mode === 'online' ? 30 : 24,
+    mode === 'duo' || mode === 'online' ? 20 : 24,
+    onlineSeed
+  );
+  game.pickups = new Pickups(scene, spots, onlineSeed);
   game.pickups.onCollect = (fighter, type) => {
     const idx = game.locals.indexOf(fighter);
     if (idx >= 0) {
@@ -339,25 +355,22 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
     }
   };
 
+  const online = mode === 'online' && !!game.online;
+
   // --- player 1 (keyboard + mouse)
   game.cam1 = makeCamera();
   game.cam1.layers.enable(1);   // own viewmodel + own grass
-  game.cam1.layers.enable(2);   // player 2's body
-  const p1 = new Fighter({
-    id: 'p1', name: 'PLAYER 1', scene,
-    camera: game.cam1, bodyLayer: 4, viewLayer: 1,
-    palette: 'p1', spawnPoints: game.spawnPoints,
-  });
-  p1.inputSource = 'kbm';
-  game.fighters.push(p1);
-  game.locals.push(p1);
-
-  game.input1 = new KeyboardMouseInput(canvas);
-  game.input1.enabled = true;
-  game.input1.onLockLost = () => {
-    if (game.input1.lookMode === 'lock' && game.running && !game.over) pauseGame();
-  };
-  game.input1.onFallbackMode = () => hud.toast(0, 'HOLD LEFT MOUSE TO LOOK');
+  game.cam1.layers.enable(2);   // the opponent's body
+  if (!online) {
+    const p1 = new Fighter({
+      id: 'p1', name: 'PLAYER 1', scene,
+      camera: game.cam1, bodyLayer: 4, viewLayer: 1,
+      palette: 'p1', spawnPoints: game.spawnPoints,
+    });
+    p1.inputSource = 'kbm';
+    game.fighters.push(p1);
+    game.locals.push(p1);
+  }
 
   // --- player 2 (controller, or the keyboard fallback)
   if (mode === 'duo') {
@@ -385,10 +398,93 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
     game.locals.push(p2);
   }
 
+  // --- online duel: one local soldier, one remote soldier
+  if (mode === 'online' && game.online) {
+    const sess = game.online;
+    // The guest's own soldier is predicted locally; the host simulates theirs
+    // for real. Either way the local view is a normal full-screen camera.
+    sess.localId = sess.id;
+    sess.localName = sess.net.name || 'YOU';
+    const me = new Fighter({
+      id: sess.id, name: sess.localName, scene,
+      camera: game.cam1, bodyLayer: 4, viewLayer: 1,
+      palette: 'p1', spawnPoints: game.spawnPoints,
+    });
+    me.inputSource = 'kbm';
+    me.isOnlineLocal = true;
+    game.fighters.push(me);
+    game.locals.push(me);
+    sess.localFighter = me;
+
+    // Remote soldier: driven by snapshots (guest) or by the peer's input
+    // frames (host). Layer 2 so the local camera can see them.
+    const peer = sess.players.find((pl) => pl.id !== sess.id);
+    const them = new Fighter({
+      id: peer?.id || 'peer', name: peer?.name || 'OPPONENT', scene,
+      bodyLayer: 2, palette: 'p2', spawnPoints: game.spawnPoints,
+    });
+    them.inputSource = 'remote';
+    them.isOnlineRemote = true;
+    game.fighters.push(them);
+    sess.remoteFighter = them;
+
+    // Spawn facing each other. The host must be on the SAME spawn on both
+    // machines, otherwise each client would think it stands where the other
+    // does — so the slot is chosen by role, never by local list order.
+    // Spawn points wrap their coordinates in `position`; reading `.x` off the
+    // wrapper yields NaN, so unwrap once here.
+    const spots = game.spawnPoints;
+    const spA = spots[0];
+    const spB = spots[Math.min(1, spots.length - 1)];
+    const a = spA.position, b = spB.position;
+    const hostAtA = sess.isHost;
+    const mySpot = hostAtA ? a : b;
+    const theirSpot = hostAtA ? b : a;
+    me.spawnAt(mySpot, Math.atan2(-(theirSpot.x - mySpot.x), -(theirSpot.z - mySpot.z)));
+    them.spawnAt(theirSpot, Math.atan2(-(mySpot.x - theirSpot.x), -(mySpot.z - theirSpot.z)));
+    me.spawnProtect = 2.5;
+    them.spawnProtect = 2.5;
+
+    // Host: keep the newest input frame from the guest. Assigned here as well
+    // as at construction so the intent is explicit at the point of use.
+    game.remoteInputs.clear();
+    sess.handlers.onRemoteInput = (from, word) => {
+      game.remoteInputs.set(from, word);
+    };
+    // Guest: nothing to do here — simulateOnline reads sess.selfState directly,
+    // which keeps the reconciliation in one place.
+    // Either side: the peer left. Mid-match that ends the duel; in the lobby it
+    // just frees their slot and re-renders.
+    sess.handlers.onPeerLeft = () => {
+      if (game.running && game.mode === 'online') {
+        endOnlineMatch('OPPONENT LEFT');
+        return;
+      }
+      if (room.lastLobby) renderLobby(room.lastLobby);
+    };
+    // Guest: the host says the duel is decided.
+    sess.handlers.onRemoteOver = () => {
+      if (game.running && game.mode === 'online' && !game.over) {
+        const m = game.match;
+        if (m) { m.remaining = 0; m.over = true; m.reason = m.reason || 'kills'; }
+        endMatch();
+      }
+    };
+
+  }
+
+  // --- local input (every mode; online included)
+  game.input1 = new KeyboardMouseInput(canvas);
+  game.input1.enabled = true;
+  game.input1.onLockLost = () => {
+    if (game.input1.lookMode === 'lock' && game.running && !game.over) pauseGame();
+  };
+  game.input1.onFallbackMode = () => hud.toast(0, 'HOLD LEFT MOUSE TO LOOK');
+
   // --- target outlines
-  // One silhouette per local player: it marks whoever that player is looking
-  // at. Each is pinned to the owning camera's layer so the other pane does not
-  // see a stray red body.
+  // One silhouette per local player, created only once the players exist: it
+  // marks whoever that player is looking at, pinned to the owning camera's
+  // layer so the other pane never sees a stray red body.
   game.outlines = [];
   const outlineLayers = [2, 4];
   for (let i = 0; i < game.locals.length; i++) {
@@ -397,6 +493,8 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
     scene.add(outline.group);
     game.outlines.push(outline);
   }
+
+  if (mode === 'online' && game.online) hud.setPing(game.online.ping || 0);
 
   // --- bots
   if (mode === 'solo') {
@@ -464,6 +562,7 @@ function endMatch() {
   const match = game.match;
   if (!match || game.over) return;
   game.over = true;
+  hud.setPing(null);
   game.paused = true;           // freezes simulate(), keeps the arena rendered
   if (document.pointerLockElement) document.exitPointerLock();
 
@@ -472,6 +571,11 @@ function endMatch() {
   if (game.input1) game.input1.enabled = false;
   if (game.input2) game.input2.enabled = false;
   document.body.classList.remove('playing');
+
+  if (game.mode === 'online' && game.online) {
+    // Tell the other player the duel is over so their screen matches.
+    game.online.net.broadcast({ t: 'over', winner: winner?.id || null });
+  }
 
   // "me" marks all local players so a split-screen scoreboard reads clearly.
   const rows = match.results(game.fighters).map((r) => ({
@@ -490,6 +594,9 @@ function endMatch() {
   let headline;
   if (game.mode === 'duo') {
     headline = winner ? `${winner.name} WINS` : 'DRAW';
+  } else if (game.mode === 'online') {
+    const meWon = winner && game.online && winner.id === game.online.id;
+    headline = winner ? (meWon ? 'YOU WIN' : `${winner.name} WINS`) : 'DRAW';
   } else {
     const you = match.results(game.fighters).find((r) => !r.fighter.isBot);
     headline = winner && winner.isBot ? `${winner.name} WINS` : 'RUN OVER';
@@ -503,11 +610,250 @@ function endMatch() {
   body.innerHTML = hud.renderEndcard(
     headline, sub,
     ['K', 'D', 'ACC', 'DMG', 'HS', 'STREAK'],
-    rows.slice(0, game.mode === 'duo' ? 2 : 8)
+    rows.slice(0, game.mode === 'duo' || game.mode === 'online' ? 2 : 8)
   );
   $('victory').classList.add('show');
   sfx.announce('victory');
 }
+
+/* ------------------------------------------------------------ online room */
+
+const room = {
+  el: null,
+  session: null,
+  busy: false,
+  started: false,
+};
+
+function roomEl(id) { return document.getElementById(id); }
+
+function openRoomScreen() {
+  room.el = roomEl('room');
+  room.el.classList.add('show');
+  $('menu').classList.remove('show');
+  roomEl('playerName').value = settings.playerName || '';
+  roomEl('roomChooser').style.display = '';
+  roomEl('roomLobby').classList.remove('show');
+  setRoomError('');
+  updateRoomButtons();
+}
+
+function closeRoomScreen() {
+  if (room.session) {
+    room.session.leave();
+    room.session = null;
+  }
+  room.started = false;
+  if (room.el) room.el.classList.remove('show');
+  $('menu').classList.add('show');
+}
+
+function setRoomError(text) {
+  const el = roomEl('roomError');
+  if (el) el.textContent = text || '';
+}
+
+function updateRoomButtons() {
+  const name = (roomEl('playerName')?.value || '').trim();
+  const hasName = name.length > 0;
+  const host = roomEl('btnHost');
+  const join = roomEl('btnJoin');
+  if (host) host.disabled = room.busy || !hasName;
+  if (join) join.disabled = room.busy || !hasName || (roomEl('roomCode').value || '').trim().length < 4;
+}
+
+function playerName() {
+  const name = ((roomEl('playerName')?.value || '').trim() || 'PLAYER').toUpperCase().slice(0, 14);
+  settings.playerName = name;
+  saveSettings();
+  return name;
+}
+
+function renderLobby(state) {
+  const lobby = roomEl('roomLobby');
+  const codeEl = roomEl('roomCodeValue');
+  const roster = roomEl('roomRoster');
+  const startBtn = roomEl('btnStartOnline');
+  const hint = roomEl('roomHint');
+  if (!lobby) return;
+
+  roomEl('roomChooser').style.display = 'none';
+  lobby.classList.add('show');
+  codeEl.textContent = state.code || room.code || '-----';
+
+  // Connected peers (presence) vs. roster entries, so a stale slot shows grey.
+  const connected = room.connectedIds || null;
+  roster.innerHTML = '';
+  for (const p of state.players || []) {
+    const li = document.createElement('li');
+    const live = !connected || connected.includes(p.id);
+    if (!live) li.classList.add('offline');
+    const who = document.createElement('span');
+    who.textContent = p.name || (p.id === room.session?.id ? 'YOU' : 'PLAYER');
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = p.isHost ? 'HOST' : (live ? 'CONNECTED' : 'LEFT');
+    li.appendChild(who);
+    li.appendChild(tag);
+    roster.appendChild(li);
+  }
+
+  const count = (state.players || []).length;
+  const isHost = room.session?.isHost;
+  if (startBtn) {
+    startBtn.style.display = isHost ? '' : 'none';
+    startBtn.disabled = count < 2 || room.busy;
+    startBtn.textContent = count < 2
+      ? 'WAITING FOR PLAYERS'
+      : (room.started ? 'STARTING…' : 'START MATCH');
+    if (room.started) startBtn.disabled = true;
+  }
+  if (hint) {
+    hint.textContent = isHost
+      ? (count < 2 ? 'Share the code. Waiting for your friend to join.' : 'Your friend is in. Start when ready.')
+      : 'Waiting for the host to start the match.';
+  }
+  updatePingLine();
+}
+
+function updatePingLine() {
+  const line = roomEl('roomPingLine');
+  const hint = roomEl('roomLatencyHint');
+  if (!line || !room.session) return;
+  const ms = room.session.ping || 0;
+  if (!ms) {
+    line.textContent = 'PING —';
+    line.className = '';
+    if (hint) hint.textContent = '';
+    return;
+  }
+  line.textContent = `PING ${Math.round(ms)} ms`;
+  line.className = ms < 80 ? 'good' : ms < 160 ? 'ok' : 'bad';
+  if (hint) {
+    hint.textContent = ms < 80 ? 'GOOD CONNECTION'
+      : ms < 160 ? 'PLAYABLE'
+      : 'HIGH LATENCY';
+  }
+}
+
+async function doHost() {
+  if (room.busy) return;
+  room.busy = true;
+  setRoomError('');
+  updateRoomButtons();
+  try {
+    const sess = new OnlineSession({
+      onLobby: (state) => {
+        room.lastLobby = state;
+        if (!room.started) renderLobby(state);
+      },
+      onStatus: (st) => {
+        if (st.type === 'presence') {
+          room.connectedIds = st.ids;
+          if (room.lastLobby) renderLobby(room.lastLobby);
+        }
+        if (st.type === 'room-gone') {
+          setRoomError('THE HOST LEFT — ROOM CLOSED');
+          if (room.started) endOnlineMatch('HOST LEFT');
+        }
+        if (st.type === 'subscribed') setRoomError('');
+      },
+    });
+    room.session = sess;
+    room.connectedIds = null;
+    const kills = parseInt(roomEl('roomKills').value, 10) || 15;
+    sess.killLimit = kills;
+    const state = await sess.host(playerName(), { killLimit: kills, seed: 0 });
+    renderLobby(state);
+  } catch (err) {
+    setRoomError(friendlyError(err));
+    room.session = null;
+  } finally {
+    room.busy = false;
+    updateRoomButtons();
+  }
+}
+
+async function doJoin() {
+  if (room.busy) return;
+  room.busy = true;
+  setRoomError('');
+  updateRoomButtons();
+  try {
+    const code = (roomEl('roomCode').value || '').trim().toUpperCase();
+    if (code.length < 4) throw new Error('ROOM CODE TOO SHORT');
+    const sess = new OnlineSession({
+      onLobby: (state) => { if (!room.started) { room.lastLobby = state; renderLobby(state); } },
+      onStatus: (st) => {
+        if (st.type === 'presence') {
+          room.connectedIds = st.ids;
+          if (room.lastLobby) renderLobby(room.lastLobby);
+        }
+        if (st.type === 'room-gone') {
+          setRoomError('THE HOST LEFT — ROOM CLOSED');
+          if (room.started) endOnlineMatch('HOST LEFT');
+          else closeRoomScreen();
+        }
+      },
+      // `start` is handled by the session (it is what flips running=true), so
+      // the guest's match begins here rather than in onMessage.
+      onStart: () => {
+        if (room.session !== sess) return;
+        room.started = true;
+        beginOnlineMatch();
+      },
+    });
+    room.session = sess;
+    const state = await sess.join(code, playerName());
+    if (!state) throw new Error('ROOM NOT FOUND');
+    if (state.status === 'live') throw new Error('THAT MATCH IS ALREADY RUNNING');
+    renderLobby(state);
+    room.connectedIds = null;
+  } catch (err) {
+    setRoomError(friendlyError(err));
+    room.session = null;
+  } finally {
+    room.busy = false;
+    updateRoomButtons();
+  }
+}
+
+function friendlyError(err) {
+  const msg = String(err?.message || err || 'SOMETHING WENT WRONG');
+  if (/ROOM NOT FOUND/i.test(msg)) return 'NO ROOM WITH THAT CODE';
+  if (/FAILED TO FETCH|NETWORKERROR/i.test(msg)) return 'CANNOT REACH THE SERVER — CHECK YOUR CONNECTION';
+  return msg.toUpperCase().slice(0, 90);
+}
+
+/** Start the shared match. Host broadcasts the seed and dives in. */
+async function startOnlineFromLobby() {
+  if (!room.session || !room.session.isHost || room.busy) return;
+  room.busy = true;
+  room.started = true;
+  updateRoomButtons();
+  try {
+    await room.session.start(Math.floor(Math.random() * 2 ** 31));
+    beginOnlineMatch();
+  } catch (err) {
+    room.started = false;
+    room.busy = false;
+    setRoomError(friendlyError(err));
+  }
+}
+
+function beginOnlineMatch() {
+  if (!room.session) return;
+  room.el?.classList.remove('show');
+  startMatch('online', 0, room.session.killLimit || 15);
+}
+
+function endOnlineMatch(reason) {
+  game.running = false;
+  quitToMenu();
+  hud.toast(0, reason || 'MATCH OVER');
+}
+
+/* ---------------------------------------------------------- online input */
 
 function pauseGame() {
   if (game.over) return;
@@ -572,7 +918,144 @@ function ctx() {
   return { fighters: game.fighters, effects, pickups: game.pickups };
 }
 
+/**
+ * Online duel. The host is the authority: it simulates every soldier, decides
+ * every hit and broadcasts the world at 20 Hz. The guest simulates only its
+ * own soldier (instant response) and interpolates the peer from snapshots.
+ */
+function simulateOnline(dt) {
+  const sess = game.online;
+  const c = ctx();
+  game.match?.update(dt);
+
+  const me = sess.localFighter;
+  const them = sess.remoteFighter;
+
+  if (sess.isHost) {
+    // ---- host: real simulation for both soldiers
+    if (me.alive) {
+      const input = readLocalInput(me);
+      me.update(dt, input, c);
+    } else {
+      me.update(dt, idleInput(), c);
+    }
+
+    if (them.alive) {
+      const frame = game.remoteInputs.get(them.id);
+      if (frame) {
+        sess.lastGuestAck = frame.seq;
+        them.update(dt, OnlineSession.unpackInput(frame.i), c);
+      } else {
+        them.update(dt, idleInput(), c);
+      }
+    } else {
+      them.update(dt, idleInput(), c);
+    }
+
+    collideBodies();
+    game.pickups.update(dt, game.fighters);
+    effects.update(dt);
+    sess.hostTick(dt, game.fighters);
+  } else {
+    // ---- guest: predict self, interpolate the host
+    if (me.alive) {
+      const input = readLocalInput(me);
+      sess.clientInput(input, dt);
+      me.update(dt, input, c);
+    } else {
+      me.update(dt, idleInput(), c);
+    }
+
+    // The host decides whether we are hit: adopt its health and score so the
+    // guest can actually die and win. Damage is applied as a delta so the local
+    // regen/prediction is not snapped back to a stale value every snapshot.
+    const meState = sess.selfState;
+    if (meState) {
+      const tookDamage = meState.health < me.health - 0.01;
+      if (tookDamage) {
+        // Same feedback a locally-simulated hit produces: red edge flash and
+        // the 5 s regen delay restarting.
+        me.hitFlash = 1;
+        me.regenDelay = REGEN_DELAY;
+        me.regenT = 0;
+        hud.flashDamage(0);
+      }
+      const wasAlive = me.alive;
+      me.health = meState.health;
+      me.armor = meState.armor;
+      me.alive = meState.alive;
+      me.kills = meState.kills;
+      me.deaths = meState.deaths;
+      // The host's snapshot is authoritative for death, but the respawn flow
+      // (timer, camera, toast) is local, so run it once on the transition.
+      if (wasAlive && !me.alive) me.onDeath?.(null);
+      if (!wasAlive && me.alive) me.onRespawn?.();
+    }
+
+    const state = sess.sampledState(them.id);
+    if (state) {
+      sess.applyRemote(them, state);
+      // Pose the remote body without moving it a second time.
+      them.stopMotion?.();
+    }
+    them.updateVisualOnly?.(dt);
+    game.pickups.update(dt, [me]);
+    effects.update(dt);
+  }
+
+  // Latency readout.
+  const shown = sess.ping || 0;
+  hud.setPing(shown);
+  game.ping = shown;
+
+  if (sess.stale) {
+    sess.staleNoticed = true;
+    hud.toast(0, 'CONNECTION LOST — WAITING');
+  }
+}
+
+function readLocalInput(f) {
+  const input = game.input1.poll();
+  if (f.weapon.kind === 'sniper' && f.aimT > 0.5) {
+    const k = 1 - f.aimT * 0.62;
+    input.lookX *= k;
+    input.lookY *= k;
+  }
+  return input;
+}
+
+function idleInput() {
+  return {
+    forward: 0, strafe: 0, lookX: 0, lookY: 0, jump: false, sprint: false,
+    crouch: false, fire: false, aim: false, reload: false, swap: false,
+    slot: 0, med: false,
+  };
+}
+
+/** Keep soldiers from standing inside each other (shared by all modes). */
+function collideBodies() {
+  for (let i = 0; i < game.fighters.length; i++) {
+    for (let j = i + 1; j < game.fighters.length; j++) {
+      const a = game.fighters[i];
+      const b = game.fighters[j];
+      if (!a.alive || !b.alive) continue;
+      const dx = b.position.x - a.position.x;
+      const dz = b.position.z - a.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.001 && d < 0.72) {
+        const push = (0.72 - d) * 0.5;
+        a.position.x -= (dx / d) * push;
+        a.position.z -= (dz / d) * push;
+        b.position.x += (dx / d) * push;
+        b.position.z += (dz / d) * push;
+      }
+    }
+  }
+}
+
 function simulate(dt) {
+  if (game.mode === 'online' && game.online) return simulateOnline(dt);
+
   const c = ctx();
   game.match?.update(dt);
 
@@ -601,24 +1084,7 @@ function simulate(dt) {
     bot.update(dt, input, c);
   }
 
-  // soft body collision so fighters cannot stand inside each other
-  for (let i = 0; i < game.fighters.length; i++) {
-    for (let j = i + 1; j < game.fighters.length; j++) {
-      const a = game.fighters[i];
-      const b = game.fighters[j];
-      if (!a.alive || !b.alive) continue;
-      const dx = b.position.x - a.position.x;
-      const dz = b.position.z - a.position.z;
-      const d = Math.hypot(dx, dz);
-      if (d > 0.001 && d < 0.72) {
-        const push = (0.72 - d) * 0.5;
-        a.position.x -= (dx / d) * push;
-        a.position.z -= (dz / d) * push;
-        b.position.x += (dx / d) * push;
-        b.position.z += (dz / d) * push;
-      }
-    }
-  }
+  collideBodies();
 
   game.pickups.update(dt, game.fighters);
   effects.update(dt);
@@ -921,6 +1387,49 @@ $('btnDuo').addEventListener('click', (e) => {
   const limit = parseInt($('killLimit').value, 10) || 15;
   startMatch('duo', 0, limit);
 });
+
+$('btnOnline').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+  openRoomScreen();
+});
+
+// --- room screen controls
+{
+  const nameInput = roomEl('playerName');
+  if (nameInput) {
+    nameInput.addEventListener('input', updateRoomButtons);
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); if (roomEl('roomCode').value.length > 0) doJoin(); else doHost(); }
+      e.stopPropagation();
+    });
+  }
+  const codeInput = roomEl('roomCode');
+  if (codeInput) {
+    codeInput.addEventListener('input', () => {
+      codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      updateRoomButtons();
+    });
+    codeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doJoin(); }
+      e.stopPropagation();
+    });
+  }
+  roomEl('btnHost')?.addEventListener('click', doHost);
+  roomEl('btnJoin')?.addEventListener('click', doJoin);
+  roomEl('btnStartOnline')?.addEventListener('click', startOnlineFromLobby);
+  roomEl('btnRoomBack')?.addEventListener('click', closeRoomScreen);
+  roomEl('btnCopyCode')?.addEventListener('click', async () => {
+    const code = roomEl('roomCodeValue')?.textContent || '';
+    try {
+      await navigator.clipboard.writeText(code);
+      roomEl('btnCopyCode').textContent = 'COPIED';
+      setTimeout(() => { roomEl('btnCopyCode').textContent = 'COPY'; }, 1400);
+    } catch (_) {
+      setRoomError('COPY FAILED — READ THE CODE ALOUD');
+    }
+  });
+}
 
 $('pause').addEventListener('click', (e) => {
   if (e.target.closest('#pauseGrid')) return;

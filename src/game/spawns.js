@@ -1,5 +1,6 @@
 import { WORLD, terrainHeight, terrainSlope } from '../world/heightfield.js';
 import { heightGrid, sampleHeight, sampleSlope } from '../world/heightgrid.js';
+import { createRandom } from '../util/math.js';
 
 // Prefer the rendered mesh surface; fall back to the analytic field if the
 // terrain has not been built yet (e.g. tools running out of order).
@@ -41,13 +42,16 @@ export function buildSpawnPoints(count = 14) {
 }
 
 /** Ground positions for pickups: flat, dry, away from the very edge. */
-export function buildPickupSpots(count = 26) {
+export function buildPickupSpots(count = 26, minGap = 26, seed = 0) {
+  // A seeded layout is identical on both clients of an online duel; unseeded
+  // (seed 0) keeps offline matches feeling fresh.
+  const rand = seed ? createRandom(seed) : Math.random;
   const spots = [];
   let tries = 0;
   while (spots.length < count && tries < 30000) {
     tries++;
-    const a = Math.random() * Math.PI * 2;
-    const r = 25 + Math.sqrt(Math.random()) * (WORLD.radius * 0.75);
+    const a = rand() * Math.PI * 2;
+    const r = 25 + Math.sqrt(rand()) * (WORLD.radius * 0.75);
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
     const h = groundAt(x, z);
@@ -56,7 +60,7 @@ export function buildPickupSpots(count = 26) {
 
     let tooClose = false;
     for (const s of spots) {
-      if (Math.hypot(s.x - x, s.z - z) < 26) { tooClose = true; break; }
+      if (Math.hypot(s.x - x, s.z - z) < minGap) { tooClose = true; break; }
     }
     if (tooClose) continue;
     spots.push({ x, y: h, z });

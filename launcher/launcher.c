@@ -11,6 +11,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>
+
+#include "localserver.c"
 #include <stdio.h>
 #include <string.h>
 
@@ -173,14 +175,42 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
   profileDir[1399] = 0;
   CreateDirectoryW(profileDir, NULL);
 
-  /* Windows path -> file:/// URL */
+  /*
+   * Serve the payload over http://127.0.0.1:<port>/ rather than opening it as
+   * file:///. A file:// page has an opaque (null) origin: CORS requests to
+   * Supabase would arrive as "Origin: null" and the realtime WebSocket has to
+   * be accepted for a null origin too. Both work in Chrome today, but both are
+   * browser policy rather than something this program controls, and online
+   * multiplayer depends on them. Serving over loopback makes the game a
+   * first-class http origin with no special-casing.
+   *
+   * If the server cannot start for any reason we still play: the file:// path
+   * below is kept as a fallback so a single-player game always works.
+   */
+  wchar_t htmlPathA[1400];
+  _snwprintf(htmlPathA, 1399, L"%s", htmlPath);
+  htmlPathA[1399] = 0;
+
+  char htmlPathUtf8[1400];
+  int haveUtf8 = WideCharToMultiByte(CP_UTF8, 0, htmlPathA, -1,
+                                     htmlPathUtf8, sizeof(htmlPathUtf8), NULL, NULL) > 0;
+
+  local_server server;
+  int served = haveUtf8 && srv_start(&server, htmlPathUtf8);
+
   wchar_t url[1500];
-  lstrcpyW(url, L"file:///");
-  size_t urlLen = 8;
-  for (size_t i = 0; htmlPath[i] && urlLen < 1490; i++) {
-    url[urlLen++] = (htmlPath[i] == L'\\') ? L'/' : htmlPath[i];
+  if (served) {
+    _snwprintf(url, 1499, L"http://127.0.0.1:%d/", server.port);
+    url[1499] = 0;
+  } else {
+    /* Windows path -> file:/// URL */
+    lstrcpyW(url, L"file:///");
+    size_t urlLen = 8;
+    for (size_t i = 0; htmlPath[i] && urlLen < 1490; i++) {
+      url[urlLen++] = (htmlPath[i] == L'\\') ? L'/' : htmlPath[i];
+    }
+    url[urlLen] = 0;
   }
-  url[urlLen] = 0;
 
   wchar_t browser[1024];
   if (find_browser(browser, 1024)) {
@@ -205,8 +235,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
       WaitForSingleObject(pi.hProcess, INFINITE);
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
+      if (served) srv_stop(&server);
       return 0;
     }
+    /* The browser refused to start: release the port before trying the shell. */
+    if (served) srv_stop(&server);
   }
 
   /* No Chromium-family browser found: hand the file to the shell. */
