@@ -83,18 +83,22 @@ vec3 waveNormal(vec2 p, float t, float dist) {
   float p4 = dot(p, d4) * f4 + t * 2.90;
   float p5 = dot(p, d5) * f5 + t * 4.10;
 
-  // Fade high frequencies with distance to avoid shimmering aliasing.
-  float atten = exp(-dist * 0.0022);
-  float a3f = a3 * mix(1.0, 0.15, 1.0 - atten);
-  float a4f = a4 * atten;
-  float a5f = a5 * atten * atten;
+  // Fade each wave band out with distance: without this, wavelengths far
+  // below a pixel produce concentric moire rings on the open sea.
+  a2 *= exp(-dist * 0.0011);
+  a3 *= exp(-dist * 0.0048);
+  a4 *= exp(-dist * 0.0170);
+  a5 *= exp(-dist * 0.0620);
 
   vec2 grad = vec2(0.0);
   grad += d1 * (a1 * f1 * cos(p1));
   grad += d2 * (a2 * f2 * cos(p2));
-  grad += d3 * (a3f * f3 * cos(p3));
-  grad += d4 * (a4f * f4 * cos(p4));
-  grad += d5 * (a5f * f5 * cos(p5));
+  grad += d3 * (a3 * f3 * cos(p3));
+  grad += d4 * (a4 * f4 * cos(p4));
+  grad += d5 * (a5 * f5 * cos(p5));
+
+  // Additional flattening on the far sea.
+  grad *= mix(1.0, 0.45, smoothstep(300.0, 2600.0, dist));
 
   return normalize(vec3(-grad.x, 1.0, -grad.y));
 }
@@ -121,7 +125,7 @@ void main() {
   // Sun glitter.
   vec3 H = normalize(uSunDir + V);
   float nh = max(dot(N, H), 0.0);
-  col += uSunColor * (pow(nh, 1200.0) * 26.0 + pow(nh, 110.0) * 0.55);
+  col += uSunColor * (pow(nh, 1400.0) * 8.0 + pow(nh, 120.0) * 0.22);
 
   // Shore foam.
   float band = smoothstep(2.2, 0.05, depth);
@@ -157,8 +161,8 @@ export function createWater() {
       uFogDensity: U.uFogDensity,
       uHeightMap: { value: buildHeightTexture(256) },
       uMapSize: { value: WORLD.size },
-      uShallowColor: { value: new THREE.Color(0x2e8f92) },
-      uDeepColor: { value: new THREE.Color(0x06263c) },
+      uShallowColor: { value: new THREE.Color(0x2f9a92) },
+      uDeepColor: { value: new THREE.Color(0x072b45) },
     },
     vertexShader,
     fragmentShader,

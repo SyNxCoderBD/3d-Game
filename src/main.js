@@ -72,14 +72,14 @@ const sun = new THREE.DirectionalLight(0xffffff, 4.2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 620;
-sun.shadow.camera.left = -120;
-sun.shadow.camera.right = 120;
-sun.shadow.camera.top = 120;
-sun.shadow.camera.bottom = -120;
-sun.shadow.bias = -0.0006;
-sun.shadow.normalBias = 0.045;
-sun.shadow.radius = 2.2;
+sun.shadow.camera.far = 720;
+sun.shadow.camera.left = -150;
+sun.shadow.camera.right = 150;
+sun.shadow.camera.top = 150;
+sun.shadow.camera.bottom = -150;
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.035;
+sun.shadow.radius = 2.6;
 scene.add(sun);
 scene.add(sun.target);
 
@@ -149,7 +149,7 @@ async function build() {
   });
 
   await step(94, 'Lighting the sun', () => {
-    motes = createMotes(1500, 75);
+    motes = createMotes(900, 62);
     scene.add(motes);
   });
 
@@ -177,6 +177,8 @@ async function build() {
       $('lookHint').classList.add('show');
       hideOverlay();
     };
+
+    grassInfo.rebuild(spawn.x, spawn.z);
 
     console.log(
       `[world] trees=${propsInfo.treeCount} rocks=${propsInfo.rockCount} ` +
@@ -363,7 +365,10 @@ function tick() {
 
   if (player) {
     if (intro) updateIntro(dt);
-    else player.update(dt);
+    else {
+      player.update(dt);
+      grassInfo.rebuild(player.position.x, player.position.z);
+    }
   }
 
   // Keep the sky dome and motes centred on the camera.
@@ -372,7 +377,7 @@ function tick() {
 
   // Sun + shadow frustum follow the viewer.
   sunWorldColor.copy(U.uSunColor.value);
-  sun.position.copy(camera.position).addScaledVector(U.uSunDir.value, 260);
+  sun.position.copy(camera.position).addScaledVector(U.uSunDir.value, 300);
   sun.target.position.copy(camera.position);
   sun.target.updateMatrixWorld();
 

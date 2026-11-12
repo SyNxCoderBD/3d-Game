@@ -52,19 +52,25 @@ falls back automatically: **hold the left mouse button and drag** to look.
 
 ## What is in the world
 
-* **Terrain** — a single analytic height field (domain-warped fBm + ridged
-  noise) evaluated identically by the mesh, the player collision, the props and
-  the ocean, so nothing ever floats or sinks. 154k vertices, ~306k triangles,
-  vertex-coloured by altitude/slope with fragment-level detail noise.
-* **Ocean** — custom shader: analytic wave normals, Fresnel sky reflection,
-  sun glitter, depth-tinted water body and shore foam driven by an 8-bit
-  height map of the sea floor.
+* **Terrain** — one analytic height field evaluated identically by the mesh,
+  the player collision and every prop, so nothing floats or sinks. Landforms are
+  built the way real ones read: a broad landmass, a single low-frequency massif
+  with soft-shouldered ridges, spurs and crags at long wavelength with bounded
+  amplitude, and mountains that fade out before the coast (no needle peaks, no
+  vertical walls — the steepest ground is ~54°, and only ~13% of land is over
+  40°). 148k vertices, vertex-coloured by biome/altitude/slope with baked
+  concavity AO, plus per-pixel relief normals and crevice shading so the ground
+  has surface texture instead of reading as smooth clay.
+* **Ocean** — custom shader: analytic wave normals with per-band distance
+  fade (no moiré on the open sea), Fresnel sky reflection, sun glitter,
+  depth-tinted water body and shore foam from a height map of the sea floor.
 * **Sky** — analytic atmosphere (horizon→zenith gradient, sun glow, sun disc)
   plus an animated multiple-octave cloud deck, shared by every shader that
   needs to reflect it.
-* **Foliage** — 26 000 instanced grass clumps with vertex-shader wind and
-  distance collapse, 620 instanced trees in four procedural variants,
-  420 rocks, 900 bushes, 1 500 drifting pollen motes.
+* **Foliage** — a world-locked grass meadow that follows the player (12.5k
+  instanced clumps in a 100 m field, ~0.8 clumps/m², updated one row/column at
+  a time as you walk), 860 instanced trees in five procedural variants with
+  layered canopies, 460 rocks, 1 100 bushes and drifting pollen motes.
 * **Lighting** — cascaded-by-hand directional sun with 2048² PCF-soft shadows
   that follow the viewer, hemisphere ambient, ACES tone mapping.
 * **Post** — MSAA 4× HDR pipeline → Unreal bloom → chromatic aberration +

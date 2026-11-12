@@ -65,6 +65,26 @@ const spawnH = terrainHeight(spawn.x, spawn.z);
 check('spawn point found', Number.isFinite(spawn.x) && spawnH > 20 && spawnH < 100, `x=${spawn.x} z=${spawn.z} h=${spawnH.toFixed(1)}`);
 check('spawn slope walkable', terrainSlope(spawn.x, spawn.z) < 0.35, terrainSlope(spawn.x, spawn.z).toFixed(2));
 
+// Landform sanity: real hills, no needles.
+console.log('\n▸ slopes');
+let steep = 0, slTotal = 0, maxSlope = 0;
+for (let z = -460; z <= 460; z += 8) {
+  for (let x = -460; x <= 460; x += 8) {
+    const h = terrainHeight(x, z);
+    if (h < 1) continue;
+    const e = 4;
+    const gx = (terrainHeight(x + e, z) - terrainHeight(x - e, z)) / (2 * e);
+    const gz = (terrainHeight(x, z + e) - terrainHeight(x, z - e)) / (2 * e);
+    const slope = Math.hypot(gx, gz);
+    maxSlope = Math.max(maxSlope, slope);
+    if (slope > 0.84) steep++;   // > 40 degrees
+    slTotal++;
+  }
+}
+const maxDeg = (Math.atan(maxSlope) * 180 / Math.PI);
+check('no vertical spikes', maxDeg < 58, `max slope ${maxDeg.toFixed(0)}°`);
+check('mostly walkable land', steep / slTotal < 0.14, `${((steep / slTotal) * 100).toFixed(1)}% steeper than 40°`);
+
 console.log('\n▸ meshes');
 const t0 = performance.now();
 const terrain = createTerrain();
@@ -86,7 +106,8 @@ for (const child of props.group.children) {
 }
 
 const grass = createGrass();
-check('grass placed', grass.count > 5000, `${grass.count} clumps`);
+grass.rebuild(spawn.x, spawn.z);
+check('grass placed', grass.count > 5000, `${grass.count} clumps around spawn`);
 check('grass meshes', grass.group.children.length > 0, `${grass.group.children.length} draw calls`);
 
 const motes = createMotes(500, 50);

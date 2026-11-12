@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { U } from '../world/environment.js';
 
 /** Floating pollen / dust motes that follow the camera — cheap atmosphere. */
-export function createMotes(count = 1400, extent = 70) {
+export function createMotes(count = 900, extent = 60) {
   const positions = new Float32Array(count * 3);
   const phases = new Float32Array(count);
   const sizes = new Float32Array(count);
@@ -12,7 +12,7 @@ export function createMotes(count = 1400, extent = 70) {
     positions[i * 3 + 1] = (Math.random() - 0.2) * extent * 0.9;
     positions[i * 3 + 2] = (Math.random() - 0.5) * extent * 2;
     phases[i] = Math.random() * Math.PI * 2;
-    sizes[i] = 0.4 + Math.random() * 1.5;
+    sizes[i] = 0.12 + Math.random() * 0.42;
   }
 
   const geo = new THREE.BufferGeometry();
@@ -43,10 +43,10 @@ export function createMotes(count = 1400, extent = 70) {
 
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         float d = -mv.z;
-        vAlpha = smoothstep(uExtent * 1.1, 8.0, d) * 0.55;
+        vAlpha = smoothstep(uExtent * 1.15, 6.0, d) * 0.3;
 
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = aSize * uPixelRatio * (120.0 / max(d, 1.0));
+        gl_PointSize = clamp(aSize * uPixelRatio * (95.0 / max(d, 1.0)), 0.6, 9.0 * uPixelRatio);
       }
     `,
     fragmentShader: /* glsl */`
@@ -56,7 +56,7 @@ export function createMotes(count = 1400, extent = 70) {
         vec2 q = gl_PointCoord - 0.5;
         float a = smoothstep(0.5, 0.02, length(q));
         if (a <= 0.001) discard;
-        gl_FragColor = vec4(uSunColor * 0.85 + 0.35, a * vAlpha);
+        gl_FragColor = vec4(uSunColor * 0.7 + 0.42, a * vAlpha);
       }
     `,
     transparent: true,

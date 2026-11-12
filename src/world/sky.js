@@ -50,7 +50,7 @@ void main() {
 
   float base = fbm2(cp * 0.55);
   float detail = fbm2(cp * 1.7 + base * 1.2);
-  float mask = smoothstep(0.50, 0.86, base * 0.72 + detail * 0.42);
+  float mask = smoothstep(0.44, 0.80, base * 0.72 + detail * 0.42);
 
   // Fade clouds out near the horizon and thin them at the zenith.
   mask *= smoothstep(0.02, 0.22, d.y);

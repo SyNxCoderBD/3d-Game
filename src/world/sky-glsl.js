@@ -20,7 +20,7 @@ vec3 skyBase(vec3 d) {
   col = mix(col, uSkyGround, smoothstep(0.015, -0.20, y));
 
   float sd = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * (0.20 * pow(sd, 5.0) + 0.55 * pow(sd, 80.0) + 10.0 * pow(sd, 2800.0));
+  col += uSunColor * (0.20 * pow(sd, 5.0) + 0.55 * pow(sd, 80.0) + 7.0 * pow(sd, 2800.0));
 
   // Slight warm band hugging the horizon opposite the sun for depth.
   float band = exp(-abs(y) * 14.0);

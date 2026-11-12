@@ -43,6 +43,11 @@ const GradeShader = {
       col.g = texture2D(tDiffuse, vUv).g;
       col.b = texture2D(tDiffuse, vUv - d * ab).b;
 
+      // Gentle saturation + contrast grade (linear space, pre tone map).
+      float gLum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(gLum), col, 1.13);
+      col = max(col - 0.0035, 0.0);
+
       // Vignette.
       float vig = 1.0 - uVignette * r2 * 0.85;
       col *= clamp(vig, 0.0, 1.0);
@@ -75,9 +80,9 @@ export function createComposer(renderer, scene, camera) {
 
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(size.width, size.height),
-    0.42, // strength
-    0.75, // radius
-    0.92  // threshold
+    0.30, // strength
+    0.72, // radius
+    1.00  // threshold
   );
   composer.addPass(bloom);
 
