@@ -281,8 +281,10 @@ async function main() {
     setNav(() => [null, null, null, null]);
     check('a momentary null list does not lose the pad', () => assert.equal(g.connected, true));
 
-    // An explicit disconnect does drop it.
-    Object.defineProperty(goodPad, 'connected', { value: false, configurable: true });
+    // An explicit disconnect does drop it. The browser signals this by listing
+    // a *different* entry marked connected:false, so the latched object's own
+    // flag is not what is consulted.
+    setNav(() => [{ index: 0, connected: false, axes: [0, 0, 0, 0], buttons: [] }]);
     g.poll(1 / 60);
     check('a real disconnect is honoured', () => assert.equal(g.connected, false));
 

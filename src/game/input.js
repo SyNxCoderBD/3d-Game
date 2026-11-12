@@ -361,6 +361,11 @@ export class GamepadInput {
    * report it missing after the browser has told us it disconnected.
    */
   get pad() {
+    // Did the browser hand us an entry that is present but marked disconnected?
+    // That is the one unambiguous disconnect signal: an *absent* slot is not
+    // evidence of anything (browsers only reveal a pad after its first input),
+    // but a slot that exists and says connected:false means the pad is gone.
+    let sawDisconnect = false;
     try {
       const pads = navigator.getGamepads ? navigator.getGamepads() : null;
       if (pads) {
@@ -370,18 +375,28 @@ export class GamepadInput {
           this._lastPad = own;
           return own;
         }
+        let anyLive = false;
         for (const p of pads) {
-          if (p && p.connected) {
-            this._lastPad = p;
-            return p;
-          }
+          if (!p) continue;
+          if (p.connected) { anyLive = true; this._lastPad = p; return p; }
+          sawDisconnect = true;
         }
+        // A live pad elsewhere already returned above; nothing else to do.
+        if (anyLive) return this._lastPad || null;
       }
     } catch (_) {
       /* getGamepads is not available here; fall back to the cached pad */
     }
-    // A pad we have seen before stays usable until an explicit disconnect,
-    // because a momentary null in the array is not a disconnect.
+    if (sawDisconnect) {
+      // The pad we were holding has gone. Note this is checked against what the
+      // browser reports now, not against the latched object's own stale
+      // `connected` flag, which keeps saying true after the pad is unplugged.
+      this._lastPad = null;
+      this.prevButtons = [];
+      return null;
+    }
+    // An absent slot is not a disconnect: keep the pad we last saw so the
+    // controller does not flicker out between polls.
     return this._lastPad || null;
   }
 
@@ -431,11 +446,9 @@ export class GamepadInput {
     // be able to reach the fatal card or abort a frame.
     let pad = null;
     try {
+      // The getter already resolves disconnects; this is only here so that a
+      // getter that somehow throws cannot take the frame down.
       pad = this.pad;
-      if (pad && pad.connected === false) {
-        this.forgetPad();
-        pad = null;
-      }
     } catch (_) {
       pad = null;
     }
