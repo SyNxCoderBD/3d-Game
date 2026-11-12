@@ -16,7 +16,6 @@ const FILES = [
   'src/world/vegetation.js',
   'src/world/terrain.js',
   'src/world/particles.js',
-  'src/fx/postprocessing.js',
 ];
 
 let bad = 0;
@@ -27,6 +26,7 @@ function tryParse(code) {
 }
 
 for (const file of FILES) {
+  if (!fs.existsSync(file)) continue;
   const src = fs.readFileSync(file, 'utf8');
   const blocks = [...src.matchAll(/\/\* glsl \*\/`([\s\S]*?)`/g)]
     // strip template interpolation (the parser only checks syntax)

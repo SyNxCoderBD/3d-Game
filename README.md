@@ -1,8 +1,12 @@
-# AETHERIS — The Verdant Isle
+# AETHERIS — Island Warfare
 
-A high-fidelity first-person island explorer. No enemies, no objectives, no
-loading screens: just you, a procedurally sculpted island, and an ocean that
-moves. It ships as **one portable Windows executable**.
+A split-screen FPS deathmatch on a procedurally sculpted island. Player 1 uses
+keyboard + mouse, Player 2 uses a controller, and you can see each other's
+position on the minimap and through the on-screen enemy tracker. Loot rifles,
+SMGs, shotguns, sniper rifles, armour and med kits scattered across the island.
+Or drop in solo against AI squads in bot practice.
+
+It ships as **one portable Windows executable**.
 
 ```
 release/Aetheris.exe      ← double-click. That's it. (~0.6 MB)
@@ -29,26 +33,75 @@ app-mode window using the Edge / Chrome engine that already ships with Windows.
 Works on Windows 10 / 11. Microsoft Edge is required (it is preinstalled on
 both); Chrome, Brave and Vivaldi are also detected.
 
+## Modes
+
+* **1P · Bot Practice** — you against 2–8 AI soldiers. Bots patrol the island,
+  take line-of-sight shots, circle-strafe, heal themselves and loot.
+* **2P · Split Screen Duel** — Player 1 (keyboard + mouse) versus Player 2
+  (controller), first to 15 eliminations. Each half of the screen has its own
+  camera, HUD, minimap and enemy tracker.
+
 ## Controls
 
-| Key | Action |
+**Player 1 — keyboard + mouse**
+
+| Input | Action |
 | --- | --- |
-| `W A S D` | Walk |
-| `Shift` | Sprint |
-| `Space` | Jump / swim up |
-| `Ctrl` | Slow walk / swim down |
+| `W A S D` | Move |
 | `Mouse` | Look |
-| `T` | Cycle time of day (Golden Hour → Midday → Dusk) |
-| `M` | Mute / unmute ambience |
-| `H` | Hide HUD |
-| `P` | Save a screenshot (PNG) |
-| `R` | Return to camp |
-| `Esc` | Pause / release the mouse |
+| `LMB` / `RMB` | Fire / aim down sights |
+| `R` | Reload |
+| `Shift` / `Space` / `Ctrl` | Sprint / jump / crouch |
+| `Q` | Use med kit |
+| `Tab` or `F` | Swap weapon |
+| `Esc` | Pause (releases the mouse) |
+| `T` / `M` | Time of day / mute |
+
+**Player 2 — controller**
+
+| Input | Action |
+| --- | --- |
+| Left stick / right stick | Move / look |
+| `RT` / `LT` | Fire / aim |
+| `A` | Jump |
+| `X` / `Y` / `B` | Reload / med kit / swap weapon |
+| `LB` / `R3` | Sprint / crouch |
+
+If a browser refuses pointer lock, the game falls back to **hold left mouse and
+drag** to look.
+
+## Weapons & loot
+
+| Weapon | Damage | Fire rate | Magazine | Notes |
+| --- | --- | --- | --- | --- |
+| P-9 Sidearm | 23 | 420 rpm | 12 | semi-auto starter |
+| VK-9 SMG | 16 | 900 rpm | 32 | spray, low recoil |
+| AR-15 Rifle | 27 | 620 rpm | 30 | all-round |
+| M870 Breacher | 12 × 9 | 75 rpm | 6 | devastating up close |
+| AWM .338 | 88 | 48 rpm | 5 | 2.6× headshot, 26° scope |
+
+Headshots multiply damage (1.6×–2.6×), damage falls off with range and every
+fighter starts with spawn protection. Loot on the ground: weapons, ammo boxes,
+med kits (+1 kit, heals 55 HP) and body armour (absorbs 55 % of incoming damage).
 
 If a browser refuses pointer lock (some locked-down machines do), the game
 falls back automatically: **hold the left mouse button and drag** to look.
 
 ---
+
+## How the combat works
+
+* **Hitscan** bullets: analytic ray/sphere test for heads, ray/box for bodies,
+  plus a marched terrain test so hills and cliffs actually block shots.
+* **Character models** — hand-built rigged soldiers (rounded volumes, helmet,
+  plate carrier, pouches, backpack, colour-coded arm patches) with a walk
+  cycle, shouldered aim pose and a fall-over death animation.
+* **Weapons** — modelled from 20–31 primitives each (receiver, handguard with
+  rail slots, barrel, muzzle brake, optic with emissive glass, curved magazine,
+  stock, grip, charging handle). Merged per material so a gun costs 4–5 draw
+  calls instead of 30.
+* **Feedback** — muzzle flash, tracer streaks, impact sparks, blood puffs,
+  recoil kick, hit markers and a kill feed.
 
 ## What is in the world
 
@@ -90,6 +143,7 @@ npm install
 npm run dev            # http://localhost:5173 (live preview)
 npm run build:exe      # → release/Aetheris.exe + release/Aetheris.html
 npm run verify         # headless world build smoke test (no GPU needed)
+npm run verify:game    # headless combat/AI/pickup simulation test
 npm run verify:shaders # GLSL syntax check for every shader source
 ```
 
@@ -119,8 +173,15 @@ src/world/sky.js        sky dome + clouds
 src/world/vegetation.js instanced trees, rocks, bushes, grass
 src/world/particles.js  drifting motes
 src/world/environment.js shared uniforms + time-of-day presets
-src/player/controller.js FPS controller (walk, sprint, jump, swim, bob)
-src/fx/postprocessing.js bloom + grade passes
+src/game/fighter.js     player/bot entity: physics, weapons, damage, models
+src/game/character.js   procedural rigged soldier + animation
+src/game/weapons.js     weapon stats + procedural gun models
+src/game/combat.js      hitscan, damage, tracers/sparks/blood
+src/game/ai.js          bot brains (patrol, engage, strafe, heal)
+src/game/pickups.js     loot spawns, models and collection
+src/game/input.js       keyboard/mouse + gamepad input
+src/game/spawns.js      spawn & loot placement
+src/ui/hud.js           per-player HUD, minimap, enemy tracker
 src/audio/ambience.js   procedural wind + drone
 launcher/launcher.c     Win32 launcher (no dependencies)
 tools/build-exe.mjs     single-file packager

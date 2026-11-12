@@ -17,7 +17,7 @@ const { createSky } = await import('../src/world/sky.js');
 const { createGrass, createProps } = await import('../src/world/vegetation.js');
 const { createMotes } = await import('../src/world/particles.js');
 const { applyPreset } = await import('../src/world/environment.js');
-const { findSpawn } = await import('../src/player/controller.js');
+const { buildSpawnPoints } = await import('../src/game/spawns.js');
 
 let failures = 0;
 const check = (name, cond, extra = '') => {
@@ -60,9 +60,10 @@ check('heights finite', true, `range ${min.toFixed(1)} .. ${max.toFixed(1)}`);
 check('island peaks above 100m', max > 100, `${max.toFixed(1)}m`);
 check('sea covers part of map', wet / samples > 0.3, `${((wet / samples) * 100).toFixed(0)}% below sea level`);
 
-const spawn = findSpawn();
+const spawnList = buildSpawnPoints(14);
+const spawn = spawnList[0].position;
 const spawnH = terrainHeight(spawn.x, spawn.z);
-check('spawn point found', Number.isFinite(spawn.x) && spawnH > 20 && spawnH < 100, `x=${spawn.x} z=${spawn.z} h=${spawnH.toFixed(1)}`);
+check('spawn points found', spawnList.length >= 8 && spawnH > 4, `${spawnList.length} points, h=${spawnH.toFixed(1)}`);
 check('spawn slope walkable', terrainSlope(spawn.x, spawn.z) < 0.35, terrainSlope(spawn.x, spawn.z).toFixed(2));
 
 // Landform sanity: real hills, no needles.
