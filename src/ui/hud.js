@@ -74,6 +74,7 @@ const PANE_TEMPLATE = `
     <div class="row"><span class="hpnum">100</span><span class="hplabel">HP</span></div>
     <div class="bar"><i class="hp"></i></div>
     <div class="bar armor-bar"><i class="armor"></i></div>
+    <div class="regen-pip"><i></i><span>REGEN</span></div>
   </div>
   <div class="weaponbox">
     <span class="wname">AR-15</span>
@@ -114,6 +115,8 @@ export class Hud {
         score: el.querySelector('.score'),
         hpNum: el.querySelector('.hpnum'),
         hpBar: el.querySelector('.hp'),
+        regenPip: el.querySelector('.regen-pip'),
+        regenFill: el.querySelector('.regen-pip i'),
         armorBar: el.querySelector('.armor'),
         wname: el.querySelector('.wname'),
         ammoB: el.querySelector('.ammo b'),
@@ -215,6 +218,17 @@ export class Hud {
     pane.hpBar.className = 'hp' + (hp < 35 ? ' low' : '');
     pane.armorBar.style.width = `${Math.max(0, fighter.armor)}%`;
 
+    // Regen readout: a thin pip that fills while the passive heal is running,
+    // and shows a countdown during the post-damage wait.
+    if (pane.regenPip) {
+      const waiting = fighter.regenDelay > 0 && hp < 100;
+      const healing = !waiting && fighter.regenT > 0 && hp < 100;
+      pane.regenPip.classList.toggle('waiting', waiting);
+      pane.regenPip.classList.toggle('healing', healing);
+      const frac = healing ? clamp01(fighter.regenT / 15) : 0;
+      if (pane.regenFill) pane.regenFill.style.transform = `scaleX(${frac})`;
+    }
+
     const def = fighter.weapon;
     const slot = fighter.slotData;
     pane.wname.textContent = def.name;
@@ -232,6 +246,9 @@ export class Hud {
       const scoped = def.kind === 'sniper' && fighter.aimT > 0.82;
       pane.crosshair.style.opacity = scoped ? '0' : '1';
     }
+
+    // Red reticle while an enemy is under the crosshair.
+    pane.crosshair.classList.toggle('on-target', !!fighter.onTarget);
 
     const reloading = fighter.reloading > 0;
     pane.crosshair.classList.toggle('reloading', reloading);
@@ -390,7 +407,13 @@ export class Hud {
     marker.style.transform = `translate(${x}px, ${y}px)`;
     marker.classList.add('show');
     marker.classList.toggle('offscreen', offscreen);
+    // On screen the marker shrinks to a 5 px dot so it never covers the enemy;
+    // off screen it stays a small pill with the distance, so you can find them.
+    marker.classList.toggle('onscreen', !offscreen);
     pane.oppTxt.textContent = `${target.name} · ${Math.round(bestD)}m`;
+    // Hide the marker entirely while the reticle is already red on that enemy:
+    // the outline and red crosshair say it better than a badge can.
+    if (self.onTarget === target && !offscreen) marker.classList.remove('show');
   }
 
   setClock(text) {

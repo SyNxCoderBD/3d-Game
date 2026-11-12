@@ -159,6 +159,21 @@ const c = (group, rt, rb, h, mat, pos, rot, seg) => add(group, cylGeo(rt, rb, h,
    Convention: the muzzle points down -Z, the grip is at the origin, +Y up.
    Everything is modelled at real scale (metres).                        */
 
+/* Named hand anchors. The character rig solves two-bone IK onto these, so the
+   soldier's hands actually wrap the grip instead of hanging at their sides.
+   `grip` is the strong hand, `foregrip` the support hand. */
+function addHandAnchors(g, grip, foregrip) {
+  const a = new THREE.Object3D();
+  a.name = 'grip';
+  a.position.set(grip[0], grip[1], grip[2]);
+  g.add(a);
+  const b = new THREE.Object3D();
+  b.name = 'foregrip';
+  b.position.set(foregrip[0], foregrip[1], foregrip[2]);
+  g.add(b);
+  return g;
+}
+
 function buildPistol() {
   const g = new THREE.Group();
 
@@ -177,6 +192,7 @@ function buildPistol() {
   muzzle.position.set(0, 0.012, -0.19);
   muzzle.name = 'muzzle';
   g.add(muzzle);
+addHandAnchors(g, [0, -0.082, 0.028], [0, -0.062, -0.005]);
   return g;
 }
 
@@ -200,6 +216,7 @@ function buildSMG() {
   muzzle.position.set(0, 0.012, -0.375);
   muzzle.name = 'muzzle';
   g.add(muzzle);
+addHandAnchors(g, [0, -0.090, -0.020], [0, -0.020, -0.150]);
   return g;
 }
 
@@ -254,6 +271,7 @@ function buildRifle() {
   muzzle.position.set(0, 0.014, -0.9);
   muzzle.name = 'muzzle';
   g.add(muzzle);
+addHandAnchors(g, [0, -0.078, 0.035], [0, -0.010, -0.200]);
   return g;
 }
 
@@ -276,6 +294,7 @@ function buildShotgun() {
   muzzle.position.set(0, 0.022, -0.73);
   muzzle.name = 'muzzle';
   g.add(muzzle);
+addHandAnchors(g, [0, -0.085, 0.030], [0, -0.022, -0.200]);
   return g;
 }
 
@@ -308,6 +327,7 @@ function buildSniper() {
   muzzle.position.set(0, 0.022, -0.9);
   muzzle.name = 'muzzle';
   g.add(muzzle);
+addHandAnchors(g, [0, -0.080, 0.040], [0, -0.050, -0.140]);
   return g;
 }
 
@@ -331,6 +351,14 @@ export function createWeaponModel(type) {
   // ~20 little parts per gun -> a handful of draw calls.
   mergeDirectMeshes(model);
   return model;
+}
+
+/** Hand anchor objects ({ grip, foregrip }) or null when the model lacks them. */
+export function weaponHands(model) {
+  const grip = model.getObjectByName('grip');
+  const foregrip = model.getObjectByName('foregrip');
+  if (!grip || !foregrip) return null;
+  return { grip, foregrip };
 }
 
 export function weaponMuzzle(model) {

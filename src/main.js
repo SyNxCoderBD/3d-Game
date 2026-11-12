@@ -13,6 +13,7 @@ import { Pickups } from './game/pickups.js';
 import { KeyboardMouseInput, GamepadInput, KeyboardSecondInput } from './game/input.js';
 import { Match } from './game/match.js';
 import { WorldColliders } from './game/colliders.js';
+import { TargetOutline } from './game/outline.js';
 import { Sfx } from './audio/sfx.js';
 import { WEAPONS } from './game/weapons.js';
 import { buildSpawnPoints, buildPickupSpots } from './game/spawns.js';
@@ -384,6 +385,19 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
     game.locals.push(p2);
   }
 
+  // --- target outlines
+  // One silhouette per local player: it marks whoever that player is looking
+  // at. Each is pinned to the owning camera's layer so the other pane does not
+  // see a stray red body.
+  game.outlines = [];
+  const outlineLayers = [2, 4];
+  for (let i = 0; i < game.locals.length; i++) {
+    const outline = new TargetOutline();
+    outline.setTarget(null, outlineLayers[i] ?? 2);
+    scene.add(outline.group);
+    game.outlines.push(outline);
+  }
+
   // --- bots
   if (mode === 'solo') {
     const names = ['VIPER', 'RAVEN', 'GHOST', 'HAVOC', 'ONYX', 'JACKAL', 'SPECTRE', 'TALON'];
@@ -647,6 +661,19 @@ function updateSpectator(idx, dt) {
   // Respawn resets the orbit.
 }
 
+/** Highlight the opponent each local player is currently aiming at. */
+function updateTargetOutlines() {
+  if (!game.outlines) return;
+  const layers = [2, 4];
+  for (let i = 0; i < game.locals.length; i++) {
+    const outline = game.outlines[i];
+    const me = game.locals[i];
+    const target = me.alive ? me.onTarget : null;
+    outline.setTarget(target, layers[i] ?? 2);
+    outline.sync();
+  }
+}
+
 function updateHud(dt) {
   if (!game.running && !game.over) return;
   for (let i = 0; i < game.locals.length; i++) {
@@ -805,6 +832,7 @@ function tick() {
   game.menuT += dt;
 
   if (game.running && !game.paused && !game.over) simulate(dt);
+  if (game.running && !game.over) updateTargetOutlines();
   render();
   updateHud(dt);
 
@@ -958,6 +986,8 @@ try {
   if (new URLSearchParams(window.location.search).has('debug')) {
     window.__aetheris = {
       game,
+      hud,
+      effects,
       startMatch,
       endMatch,
       pauseGame,

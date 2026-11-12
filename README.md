@@ -175,6 +175,24 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.2.0 — held weapons, regen, target feedback
+- **The soldier actually holds the gun.** Upper and forearm bones are solved
+  with analytic two-bone IK onto anchor points on the weapon itself (grip and
+  foregrip), so the hands wrap the rifle in every stance, weapon and pose
+  instead of leaving it welded to the chest with the arms hanging behind it.
+- **Health regenerates.** Five seconds after the last hit the bar starts
+  refilling and reaches full in fifteen seconds. The medkit is unchanged and
+  still the instant top-up — it also resets the slow regen.
+- **Reticle turns red** the moment an opponent is under the crosshair, using
+  the same hitboxes the bullets use, and it will not go red through cover.
+- **Red body outline** on the opponent you are aiming at.
+- **The enemy locator is now tiny.** On screen it collapses to a 5 px dot and
+  hides entirely when the reticle is already on the target; off screen it stays
+  a small pill with the distance.
+- **Pad aim assist** (player 2 on a controller): a light pull that eases the
+  last few degrees of stick aim inside a ~9 degree cone. It never snaps and
+  never tracks a target for you.
+
 ### 1.1.1 — cover & balance
 - **Trees are real cover.** Trunks are a little wider with a flared base, they
   are solid to bullets, bodies and bot line-of-sight, and they are placed with

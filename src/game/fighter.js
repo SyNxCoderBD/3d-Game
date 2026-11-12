@@ -1,15 +1,23 @@
 import * as THREE from 'three';
 import { WORLD } from '../world/heightfield.js';
 import { sampleHeight } from '../world/heightgrid.js';
-import { WEAPONS, createWeaponModel, weaponMuzzle } from './weapons.js';
+import { WEAPONS, createWeaponModel, weaponMuzzle, weaponHands } from './weapons.js';
 import { createCharacter, animateCharacter } from './character.js';
-import { hitscan } from './combat.js';
+import { hitscan, hitboxDistances } from './combat.js';
 import { clamp, damp, lerp } from '../util/math.js';
 
 export const EYE_HEIGHT = 1.62;
 
+/* Health regenerates on its own: wait a beat after the last hit, then refill a
+   full bar over REGEN_TIME. A medkit is the instant option. */
+export const REGEN_DELAY = 5.0;
+export const REGEN_TIME = 15.0;
+
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+// Dedicated to the reticle test, which runs after the weapon code.
+const _c1 = new THREE.Vector3();
+const _c2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
 function setLayersDeep(obj, layer) {
@@ -76,6 +84,10 @@ export class Fighter {
     this.deaths = 0;
     this.medkits = 2;
     this.medCooldown = 0;
+    // Passive regen: 5 s after the last hit, then a full bar over 15 s.
+    this.regenDelay = 0;
+    this.regenT = 0;
+    this.onTarget = null;
     this.hitFlash = 0;
     this.lastHitBy = null;
 
@@ -125,6 +137,7 @@ export class Fighter {
     this.bodyGun = null;
     this.viewFlash = null;
     this.bodyMuzzleFlash = null;
+    this._hands = null;
     this.refreshWeaponModels();
   }
 
@@ -152,6 +165,8 @@ export class Fighter {
       setLayersDeep(this.bodyGun, this.bodyLayer);
       this.rig.gunMount.add(this.bodyGun);
       this.bodyMuzzleFlash = attachFlash(this.bodyGun, this.bodyLayer);
+      // Anchor objects the arms are solved onto each frame.
+      this._hands = weaponHands(this.bodyGun);
       this._gunId = id;
     }
 
@@ -239,11 +254,38 @@ export class Fighter {
     this.onReloadStart?.(def);
   }
 
+  /**
+   * Passive health regen. After REGEN_DELAY seconds without damage the bar
+   * refills from wherever it is up to 100 at REGEN_TIME seconds per full bar.
+   * `regenT` drives the HUD so the player can see it filling.
+   */
+  updateRegen(dt) {
+    if (!this.alive || this.health >= 100) {
+      this.regenT = this.health >= 100 ? 0 : this.regenT;
+      return;
+    }
+    if (this.regenDelay > 0) {
+      this.regenDelay = Math.max(0, this.regenDelay - dt);
+      return;
+    }
+    this.regenT += dt;
+    // A full 100-point bar takes REGEN_TIME seconds.
+    this.health = Math.min(100, this.health + (100 / REGEN_TIME) * dt);
+    if (this.health >= 100) {
+      this.health = 100;
+      this.regenT = 0;
+    }
+  }
+
   useMedkit() {
     if (this.medkits <= 0 || this.medCooldown > 0 || this.health >= 100) return false;
     this.medkits--;
+    // The medkit is the fast refill: top up immediately and reset the slow
+    // passive regen, so it does not double-dip.
     this.health = Math.min(100, this.health + 55);
     this.medCooldown = 1.4;
+    this.regenDelay = 0;
+    this.regenT = 0;
     this.onHeal?.();
     return true;
   }
@@ -258,6 +300,8 @@ export class Fighter {
     this.alive = true;
     this.respawnTimer = 0;
     this.spawnProtect = 1.2;
+    this.regenDelay = 0;
+    this.regenT = 0;
     this.yaw = yaw;
     this.pitch = 0;
     this.rig.deathT = 0;
@@ -308,6 +352,9 @@ export class Fighter {
     this.health -= dmg;
     this.hitFlash = 1;
     this.lastHitBy = from;
+    // Getting shot restarts the regen wait and the fill clock.
+    this.regenDelay = REGEN_DELAY;
+    this.regenT = 0;
     if (from) {
       // Bearing of the incoming fire relative to where this fighter is
       // looking: 0 = dead ahead, +PI/2 = to the right.
@@ -351,6 +398,7 @@ export class Fighter {
       this.flashTimer -= dt;
       if (this.flashTimer <= 0 && this.bodyMuzzleFlash) this.bodyMuzzleFlash.visible = false;
     }
+    this.updateRegen(dt);
 
     if (!this.alive) {
       this.respawnTimer -= dt;
@@ -359,21 +407,27 @@ export class Fighter {
       return;
     }
 
-    // Aim assist: pad players get a gentle magnetic pull while aiming down
-    // sights. It never snaps — it only slows the reticle near a target.
-    if (this.aimAssist && ctx && (input.lookX || input.lookY)) {
+    // Aim assist: pad players get a gentle magnetic pull toward the enemy
+    // nearest the reticle. It is deliberately weak — it shortens the last few
+    // degrees of stick work, it never snaps onto a target or tracks for you.
+    let lookX = input.lookX || 0;
+    let lookY = input.lookY || 0;
+    if (this.aimAssist && ctx) {
       const assist = this.computeAimAssist(ctx.fighters);
       if (assist) {
-        input.lookX += assist.x;
-        input.lookY += assist.y;
+        // Applied locally: the input objects are owned by the input devices
+        // and must not be mutated, or a static object (a test, a replay) would
+        // keep the assist for ever.
+        lookX += assist.x;
+        lookY += assist.y;
       }
     }
 
     // look
-    if (input.lookX || input.lookY) {
-      this.yaw -= input.lookX;
-      this.pitch = clamp(this.pitch - input.lookY, -1.45, 1.45);
-      this.lookKick += input.lookX * 2 + input.lookY * 1.2;
+    if (lookX || lookY) {
+      this.yaw -= lookX;
+      this.pitch = clamp(this.pitch - lookY, -1.45, 1.45);
+      this.lookKick += lookX * 2 + lookY * 1.2;
     }
 
     this.aiming = !!input.aim && this.swapTimer <= 0;
@@ -484,6 +538,14 @@ export class Fighter {
     // body + camera
     this.bodyAnchor.position.copy(this.position);
     this.bodyAnchor.rotation.y = this.yaw;
+    this.bodyAnchor.updateMatrixWorld(true);
+
+    // Where the hands must sit this frame: read the hand anchors off the
+    // weapon that is actually in the body rig, so the arms follow the gun
+    // through recoil, weapon swaps and the aim transition.
+    const hands = this._hands
+      ? { grip: this._hands.grip.getWorldPosition(_v1), foregrip: this._hands.foregrip.getWorldPosition(_v2) }
+      : null;
 
     animateCharacter(this.rig, {
       speed: this.speed,
@@ -492,6 +554,7 @@ export class Fighter {
       aimPitch: this.pitch + this.recoilPitch,
       crouch: this.crouching,
       dead: false,
+      hands: hands ? { grip: hands.grip, foregrip: hands.foregrip, pitch: this.pitch + this.recoilPitch } : null,
     }, dt);
 
     const moving = this.grounded && this.speed > 0.5;
@@ -500,6 +563,32 @@ export class Fighter {
 
     if (this.camera) this.syncCamera(dt);
     if (this.viewPivot) this.updateViewmodel(dt);
+
+    // Is an enemy under the reticle? Drives the red crosshair and the body
+    // outline. Cheap: one sphere/box test per living opponent, no raycast.
+    this.onTarget = this.findReticleTarget(ctx.fighters, ctx?.effects?.world);
+  }
+
+  /**
+   * The opponent whose body the crosshair is actually over, or null.
+   * Uses the same volumes the hitscan does, so "red crosshair" means the next
+   * bullet connects.
+   */
+  findReticleTarget(fighters, world = null) {
+    if (!fighters || !this.alive) return null;
+    const origin = this.getEyePosition(_c1);
+    const dir = this.getAimDirection(_c2);
+    let best = null;
+    let bestD = this.weapon.range;
+    for (const other of fighters) {
+      if (other === this || !other.alive) continue;
+      const { head, body } = hitboxDistances(origin, dir, other);
+      const d = head > 0 && (body < 0 || head <= body) ? head : body;
+      if (d > 0 && d < bestD) { bestD = d; best = other; }
+    }
+    // Cover counts: no red reticle through a tree.
+    if (best && world && world.raycast(origin, dir, bestD).t < bestD) return null;
+    return best;
   }
 
   syncCamera() {
@@ -555,8 +644,10 @@ export class Fighter {
   }
 
   computeAimAssist(fighters) {
-    const fovX = 0.30;
-    const fovY = 0.22;
+    // Wider than a hair, narrower than a snap: only the cone right around the
+    // crosshair is helped.
+    const fovX = 0.16;           // ~9 deg: the outer edge of stick precision
+    const fovY = 0.10;
     let best = null;
     let bestScore = Infinity;
     for (const other of fighters) {
@@ -564,7 +655,7 @@ export class Fighter {
       const dx = other.position.x - this.position.x;
       const dz = other.position.z - this.position.z;
       const d = Math.hypot(dx, dz);
-      if (d > 45 || d < 1.5) continue;
+      if (d > 40 || d < 1.5) continue;
       const desiredYaw = Math.atan2(-dx, -dz);
       let dy = desiredYaw - this.yaw;
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
@@ -577,10 +668,13 @@ export class Fighter {
       if (score < bestScore) { bestScore = score; best = { dy, dp, d }; }
     }
     if (!best) return null;
-    const strength = this.aiming ? 0.9 : 0.42;
+    // A constant, light pull applied every frame (input look is in radians per
+    // frame for the pad), scaled down as the target gets further away.
+    // Exponential damping of the error: it halves the miss over about a
+    // second and then levels off, leaving the last degree to the player.
+    const strength = this.aiming ? 0.022 : 0.012;
     const falloff = Math.max(0.25, 1 - best.d / 45);
-    // Compensate for the fixed look speed the pad applies per frame.
-    const k = strength * falloff * 0.05;
+    const k = strength * falloff;
     return { x: -best.dy * k, y: -best.dp * k };
   }
 

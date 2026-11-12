@@ -6,7 +6,7 @@ import { sampleHeight } from '../world/heightgrid.js';
 const _v = new THREE.Vector3();
 
 /** Ray vs axis-aligned box (slab method). Returns entry distance or -1. */
-function rayBox(origin, dir, min, max) {
+export function rayBox(origin, dir, min, max) {
   let tmin = 0;
   let tmax = Infinity;
   for (let i = 0; i < 3; i++) {
@@ -29,7 +29,7 @@ function rayBox(origin, dir, min, max) {
 }
 
 /** Ray vs sphere, returns distance or -1. */
-function raySphere(origin, dir, center, radius) {
+export function raySphere(origin, dir, center, radius) {
   const ox = origin.x - center.x;
   const oy = origin.y - center.y;
   const oz = origin.z - center.z;
@@ -43,6 +43,24 @@ function raySphere(origin, dir, center, radius) {
   if (t0 > 0.001) return t0;
   if (t1 > 0.001) return t1;
   return -1;
+}
+
+/**
+ * The distances at which a ray enters an opponent's hitboxes.
+ * Returns { head, body } in metres, or -1 when that volume is missed.
+ * Fighter.hitscan and the HUD reticle check both use this so "the crosshair
+ * is red" always means "the next bullet connects".
+ */
+export function hitboxDistances(origin, dir, f) {
+  const headY = f.position.y + (f.crouching ? 1.18 : 1.62);
+  _v.set(f.position.x, headY, f.position.z);
+  const head = raySphere(origin, dir, _v, 0.19);
+
+  const h = f.crouching ? 1.25 : 1.75;
+  const body = rayBox(origin, dir,
+    { x: f.position.x - 0.28, y: f.position.y + 0.05, z: f.position.z - 0.28 },
+    { x: f.position.x + 0.28, y: f.position.y + h, z: f.position.z + 0.28 });
+  return { head, body };
 }
 
 /**

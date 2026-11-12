@@ -93,12 +93,12 @@ export function createCharacter(paletteKey = 'botA', accentOverride = null) {
     shoulder.position.set(side * 0.235, 0.50, 0);
     hips.add(shoulder);
     mk(GEO.shoulder, mat.vest, shoulder, [0, 0.01, 0]);
-    mk(GEO.upperArm, mat.uniform, shoulder, [0, -0.145, 0]);
+    mk(GEO.upperArm, mat.uniform, shoulder, [0, -0.160, 0]);
     const elbow = new THREE.Group();
-    elbow.position.set(0, -0.28, 0);
+    elbow.position.set(0, -0.32, 0);
     shoulder.add(elbow);
-    mk(GEO.forearm, mat.uniform, elbow, [0, -0.10, 0]);
-    const hand = mk(GEO.hand, mat.skin, elbow, [0, -0.22, 0]);
+    mk(GEO.forearm, mat.uniform, elbow, [0, -0.130, 0]);
+    const hand = mk(GEO.hand, mat.skin, elbow, [0, -0.26, 0]);
     return { shoulder, elbow, hand };
   };
   const armL = makeArm(-1);
@@ -122,7 +122,7 @@ export function createCharacter(paletteKey = 'botA', accentOverride = null) {
 
   // weapon mount, parented to the chest so it follows the torso
   const gunMount = new THREE.Group();
-  gunMount.position.set(0.045, 0.30, -0.33);
+  gunMount.position.set(0.02, 0.23, -0.24);
   hips.add(gunMount);
 
   // Collapse the static chunks on the torso and head into a few meshes.
@@ -135,6 +135,9 @@ export function createCharacter(paletteKey = 'botA', accentOverride = null) {
     head,
     armL,
     armR,
+    // Bone measurements used by the arm IK below.
+    upperArmLen: 0.32,
+    foreArmLen: 0.26,
     legL,
     legR,
     gunMount,
@@ -148,6 +151,85 @@ export function createCharacter(paletteKey = 'botA', accentOverride = null) {
  * Animate a character rig.
  * state: { speed, grounded, aiming, aimPitch, dead, crouch }
  */
+/* --------------------------------------------------------------- arm IK
+
+   Two-bone analytic IK in the arm's own space. Kicking a hand to a world
+   position makes the soldier actually hold the weapon instead of pointing a
+   gun welded to their chest while their arms hang by their sides.          */
+
+const _ikTarget = new THREE.Vector3();
+const _ikElbow = new THREE.Vector3();
+const _ikEnd = new THREE.Vector3();
+const _ikPole = new THREE.Vector3();
+const _ikDir = new THREE.Vector3();
+const _ikQ = new THREE.Quaternion();
+const _ikQp = new THREE.Quaternion();
+const _ikV = new THREE.Vector3();
+const _ikArm = new THREE.Vector3();
+const _ikRest = new THREE.Vector3();
+const _ikWrist = new THREE.Vector3();
+const _ikRoot = new THREE.Vector3();
+const _ikOrigin = new THREE.Vector3();
+
+/**
+ * Solve one arm onto `worldTarget` (in the rigid root's parent space).
+ *
+ * The limb is built along -Y, so the rest direction is (0,-1,0). `poleWorld`
+ * names the direction the elbow should bulge towards. Everything is done in
+ * the arm's parent space, which is valid because the whole rig is only ever
+ * translated and yawed by the body anchor.
+ */
+function solveArm(rig, arm, worldTarget, poleWorld) {
+  const parent = arm.shoulder.parent;
+  if (!parent) return;
+
+  // Solve in the shoulder's parent space. The rig is only translated and
+  // yawed, so this frame is a pure rotation/translation of world space.
+  parent.updateWorldMatrix(true, false);
+  parent.getWorldPosition(_ikOrigin);
+  _ikQp.copy(parent.getWorldQuaternion(_ikQp));
+  // The chain starts at the shoulder joint, not at the parent's origin.
+  _ikRoot.copy(worldTarget).sub(_ikOrigin).applyQuaternion(_ikQp.invert())
+    .sub(arm.shoulder.position);
+
+  const L1 = rig.upperArmLen;
+  const L2 = rig.foreArmLen;
+  const want = _ikRoot.length();
+  const reach = Math.min(want, L1 + L2 - 0.006);
+  if (reach < 1e-4) return;
+  _ikDir.copy(_ikRoot).normalize();
+
+  // Cosines for the two joint angles (law of cosines on the triangle).
+  const cosShoulder = THREE.MathUtils.clamp(
+    (L1 * L1 + reach * reach - L2 * L2) / (2 * L1 * reach), -1, 1);
+  const sinShoulder = Math.sqrt(Math.max(0, 1 - cosShoulder * cosShoulder));
+
+  // Elbow plane: pole vectors, orthonormalised against the reach direction.
+  _ikPole.copy(poleWorld).applyQuaternion(_ikQp).addScaledVector(_ikDir, -_ikPole.dot(_ikDir));
+  if (_ikPole.lengthSq() < 1e-6) {
+    // Any perpendicular will do when the caller's pole is degenerate.
+    _ikPole.set(0, 0, 1).cross(_ikDir);
+    if (_ikPole.lengthSq() < 1e-6) _ikPole.set(1, 0, 0);
+  }
+  _ikPole.normalize();
+
+  // Elbow sits in the plane spanned by the reach direction and the pole.
+  _ikElbow.copy(_ikDir).multiplyScalar(L1 * cosShoulder).addScaledVector(_ikPole, L1 * sinShoulder);
+  _ikEnd.copy(_ikDir).multiplyScalar(reach);
+
+  // Shoulder rotation: rest direction (0,-1,0) -> upper arm direction.
+  const rest = _ikRest.set(0, -1, 0);
+  const toElbow = _ikArm.copy(_ikElbow).normalize();
+  const shoulderQ = _ikQ.setFromUnitVectors(rest, toElbow);
+  arm.shoulder.quaternion.copy(shoulderQ);
+
+  // Elbow rotation, in the shoulder's own frame. The forearm's rest direction
+  // there is still (0,-1,0); rotating it onto (wrist - elbow) folds the arm.
+  const toWrist = _ikWrist.copy(_ikEnd).sub(_ikElbow).normalize();
+  toWrist.applyQuaternion(_ikQ.copy(shoulderQ).invert());
+  arm.elbow.quaternion.setFromUnitVectors(rest, toWrist);
+}
+
 export function animateCharacter(rig, state, dt) {
   const moving = state.speed > 0.4 && state.grounded;
   rig.walkPhase += dt * (2.2 + state.speed * 1.15);
@@ -208,7 +290,24 @@ export function animateCharacter(rig, state, dt) {
 
   // Gun follows the aim
   rig.gunMount.rotation.x = pitch * 0.85;
-  rig.gunMount.position.y = THREE.MathUtils.lerp(0.10, 0.30, aim);
-  rig.gunMount.position.z = THREE.MathUtils.lerp(-0.12, -0.33, aim);
-  rig.gunMount.rotation.z = THREE.MathUtils.lerp(0.5, 0, aim);
+  // The weapon sits on the right-hand side of the chest with the stock in the
+  // shoulder pocket — not centred like a box held under the chin. That offset
+  // is what makes the pose read as "carrying a rifle" rather than "holding a
+  // plank", and it keeps the support arm from crossing the body.
+  rig.gunMount.position.x = THREE.MathUtils.lerp(0.02, 0.065, aim);
+  rig.gunMount.position.y = THREE.MathUtils.lerp(0.23, 0.30, aim);
+  rig.gunMount.position.z = THREE.MathUtils.lerp(-0.24, -0.25, aim);
+  rig.gunMount.rotation.z = THREE.MathUtils.lerp(0.10, 0, aim);
+  rig.gunMount.rotation.y = THREE.MathUtils.lerp(0.05, 0.02, aim);
+
+  // Hands on the weapon. Without this the gun is welded to the chest and the
+  // arms dangle behind it, which reads as the player not holding the gun.
+  if (state.hands) {
+    rig.root.updateWorldMatrix(true, true);
+    // Elbows flare out to the sides and slightly down/back, the way a shooter
+    // stands — otherwise the IK folds them through the torso.
+    solveArm(rig, rig.armR, state.hands.grip, _ikPole.set(1, -0.75, 0.55));
+    solveArm(rig, rig.armL, state.hands.foregrip, _ikPole.set(-1, -0.55, 0.25));
+    // The two calls share a temp, so pass distinct instances.
+  }
 }

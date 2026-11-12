@@ -120,6 +120,9 @@
   .crosshair.ads i:nth-child(3) { transform: translateX(-4px); }
   .crosshair.ads i:nth-child(4) { transform: translateX(4px); }
   .crosshair.reloading { opacity: 0.35; }
+  /* The reticle turns red the moment an enemy is under it. */
+  .crosshair.on-target i { background: #ff4d43; box-shadow: 0 0 8px rgba(255, 40, 30, 0.95); }
+  .crosshair.on-target b { background: #ff6a5e; box-shadow: 0 0 10px rgba(255, 40, 30, 1); }
 
   .hitmarker {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.7);
@@ -254,17 +257,27 @@
     font-size: 9px; letter-spacing: 0.2em; color: #7ef7e4;
   }
 
+  /* Enemy locator: deliberately tiny, so it points at the opponent without
+     covering him. Only the distance text is shown, on a hairline pill. */
   .opp-marker {
     position: absolute; left: 0; top: 0; transform-origin: 50% 50%;
-    padding: 3px 8px; border-radius: 10px;
-    background: rgba(120, 10, 10, 0.6); border: 1px solid rgba(255, 120, 110, 0.6);
-    color: #ffd7d2; font-size: 9px; letter-spacing: 0.16em; white-space: nowrap;
-    opacity: 0; transition: opacity 0.2s ease; pointer-events: none;
-    box-shadow: 0 0 14px rgba(255, 60, 60, 0.28);
+    padding: 1px 5px; border-radius: 7px;
+    background: rgba(120, 10, 10, 0.45); border: 1px solid rgba(255, 120, 110, 0.42);
+    color: #ffd7d2; font-size: 8px; line-height: 11px; letter-spacing: 0.06em;
+    white-space: nowrap; opacity: 0; transition: opacity 0.2s ease; pointer-events: none;
+    box-shadow: 0 0 8px rgba(255, 60, 60, 0.2);
     will-change: transform;
   }
   .opp-marker.show { opacity: 1; }
-  .opp-marker.offscreen { background: rgba(120, 10, 10, 0.32); }
+  .opp-marker.offscreen { background: rgba(120, 10, 10, 0.3); }
+  /* When the enemy is on screen the pill collapses to a 4px dot: the red
+     outline on their body does the pointing instead. */
+  .opp-marker.onscreen {
+    padding: 0; width: 5px; height: 5px; min-width: 0; border-radius: 50%;
+    background: rgba(255, 70, 60, 0.85); border: none;
+    box-shadow: 0 0 6px rgba(255, 50, 40, 0.9);
+  }
+  .opp-marker.onscreen .txt { display: none; }
 
   .vitals { position: absolute; left: 22px; bottom: 26px; width: 210px; }
   .vitals .row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
@@ -274,6 +287,21 @@
   .vitals .bar i { display: block; height: 100%; width: 100%; transition: width 0.15s ease; }
   .vitals .hp { background: linear-gradient(90deg, #4ce0b0, #9df7c8); }
   .vitals .hp.low { background: linear-gradient(90deg, #ff4d4d, #ff8a6a); }
+  .regen-pip {
+    display: flex; align-items: center; gap: 5px; margin-top: 3px;
+    font-size: 7.5px; letter-spacing: 0.22em; color: #4b6b60;
+    opacity: 0; transition: opacity 0.25s ease;
+  }
+  .regen-pip i {
+    display: block; width: 54px; height: 2px; background: rgba(126, 247, 228, 0.75);
+    transform-origin: 0 50%; transform: scaleX(0);
+    box-shadow: 0 0 6px rgba(126, 247, 228, 0.6);
+  }
+  .regen-pip.waiting, .regen-pip.healing { opacity: 1; }
+  .regen-pip.waiting { color: #7d9388; }
+  .regen-pip.waiting i { background: rgba(125, 147, 136, 0.5); box-shadow: none; }
+  .regen-pip.healing { color: #7ef7e4; }
+
   .armor-bar { height: 4px !important; }
   .vitals .armor { background: linear-gradient(90deg, #4b8dff, #8ab6ff); }
 

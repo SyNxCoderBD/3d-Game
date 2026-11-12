@@ -415,6 +415,86 @@ if (api) {
   check('swapped body gun keeps the body layer', inspectLayers(p1.bodyGun, 4));
 }
 
+console.log('\n▸ combat readouts');
+if (api) {
+  const [p1, p2] = api.game.locals;
+  const pane = () => api.hud.panes[0];
+  const pose = { forward: 0, strafe: 0, lookX: 0, lookY: 0, jump: false, sprint: false, crouch: false, fire: false, aim: false, reload: false, swap: false, slot: 0, med: false };
+  const ctx = { fighters: api.game.fighters, effects: api.game.effects, pickups: api.game.pickups };
+
+  // Reticle turns red when an opponent is under it.
+  const foe = api.game.fighters.find((f) => f !== p1 && f.alive);
+  if (foe) {
+    foe.position.copy(p1.position);
+    foe.position.z -= 10;
+    foe.bodyAnchor.position.copy(foe.position);
+    const dx = foe.position.x - p1.position.x;
+    const dz = foe.position.z - p1.position.z;
+    p1.yaw = Math.atan2(-dx, -dz);
+    p1.pitch = Math.atan2((foe.position.y + 1.2) - (p1.position.y + 1.62), Math.hypot(dx, dz));
+    p1.update(1 / 60, pose, ctx);
+    api.hud.update(1 / 60, 0, p1, api.game.fighters, api.game.pickups, api.game.cam1);
+    check('crosshair goes red on an enemy', pane().crosshair.classList.contains('on-target'));
+    p1.yaw += 0.9;
+    p1.update(1 / 60, pose, ctx);
+    api.hud.update(1 / 60, 0, p1, api.game.fighters, api.game.pickups, api.game.cam1);
+    check('crosshair back to white when clear', !pane().crosshair.classList.contains('on-target'));
+  }
+
+  // Health regenerates: 5 s wait, then 15 s for a full bar.
+  p1.health = 40;
+  p1.regenDelay = 5;
+  p1.regenT = 0;
+  for (let i = 0; i < 4 * 60; i++) p1.updateRegen(1 / 60);
+  check('no regen during the 5 s wait', Math.abs(p1.health - 40) < 0.01, `${p1.health.toFixed(1)} hp`);
+  for (let i = 0; i < 12 * 60; i++) p1.updateRegen(1 / 60);
+  check('regen fills the bar', p1.health > 99, `${p1.health.toFixed(0)} hp after 16 s`);
+
+  // The regen pip is wired into the HUD.
+  p1.health = 55;
+  p1.regenDelay = 5;
+  p1.regenT = 0;
+  api.hud.update(1 / 60, 0, p1, api.game.fighters, api.game.pickups, api.game.cam1);
+  check('regen pip shows while waiting', pane().regenPip.classList.contains('waiting'));
+  p1.regenDelay = 0;
+  p1.regenT = 7;
+  api.hud.update(1 / 60, 0, p1, api.game.fighters, api.game.pickups, api.game.cam1);
+  check('regen pip shows while healing', pane().regenPip.classList.contains('healing'));
+
+  // The enemy locator collapses to a dot on screen. The stub camera has no real
+  // projection, so drive the marker with a camera that maps the enemy to the
+  // middle of the viewport.
+  {
+    const cam = new THREE.PerspectiveCamera(78, 16 / 9, 0.05, 2000);
+    cam.position.copy(p1.position);
+    cam.lookAt(p1.position.x, p1.position.y + 1.2, p1.position.z - 10);
+    cam.updateMatrixWorld(true);
+    cam.updateProjectionMatrix();
+    const foe2 = api.game.fighters.find((f) => f !== p1 && f.alive);
+    if (foe2) {
+      foe2.position.set(p1.position.x, p1.position.y, p1.position.z - 10);
+      foe2.bodyAnchor.position.copy(foe2.position);
+      p1.onTarget = null;
+      api.hud.updateOpponentMarker(pane(), p1, api.game.fighters, cam);
+      const om = pane().oppMarker;
+      check('enemy locator is a dot, not a banner', om.classList.contains('onscreen'),
+        [...om.classList.set].join(' ') || 'no classes');
+      p1.onTarget = foe2;
+      api.hud.updateOpponentMarker(pane(), p1, api.game.fighters, cam);
+      check('enemy locator hides once you are on target', !om.classList.contains('show'));
+      p1.onTarget = null;
+    }
+  }
+
+  // Hands are on the weapon.
+  const hr = p1.rig.armR.hand.getWorldPosition(new THREE.Vector3());
+  const grip = p1._hands.grip.getWorldPosition(new THREE.Vector3());
+  check('hands grip the weapon', hr.distanceTo(grip) < 0.06, `${(hr.distanceTo(grip) * 100).toFixed(1)} cm`);
+
+  // Red outline exists and follows the reticle target.
+  check('target outline attached', Array.isArray(api.game.outlines) && api.game.outlines.length >= 1);
+}
+
 console.log('\n▸ win condition + scoreboard');
 check('debug handle exposed', !!api);
 if (api) {
