@@ -80,12 +80,19 @@ function git(...args) {
   }
 }
 
-/** The URL Postgres will fetch. Must be reachable from the internet. */
+/**
+ * The URL Postgres will fetch.
+ *
+ * Pinned to a commit, not a branch. A branch URL is served through a CDN that
+ * keeps handing back the previous build for a while after a push — which
+ * silently publishes the old html under the new version number. Commit URLs
+ * are immutable, so the bytes fetched are the bytes committed.
+ */
 function sourceUrl() {
   if (sourceOverride) return String(sourceOverride);
-  const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
-  if (!branch || branch === 'HEAD') fail('cannot determine the branch; pass --source explicitly');
-  return `https://raw.githubusercontent.com/${REPO}/${branch}/release/Aetheris.html`;
+  const commit = git('rev-parse', 'HEAD');
+  if (!commit) fail('cannot determine the commit; pass --source explicitly');
+  return `https://raw.githubusercontent.com/${REPO}/${commit}/release/Aetheris.html`;
 }
 
 /**
@@ -226,12 +233,13 @@ async function main() {
 
     /* Postgres fetches asynchronously; poll the finish step until it either
      * publishes or gives up. 30 s is generous for a sub-megabyte file. */
+    const commit = git('rev-parse', 'HEAD') || null;
     const deadline = Date.now() + 30_000;
     let result = null;
     while (Date.now() < deadline) {
       const r = await client.query(
-        `select public.aetheris_publish_finish($1, $2, $3, $4) as result`,
-        [version, job.request_id, notes, channel]
+        `select public.aetheris_publish_finish($1, $2, $3, $4, $5, $6) as result`,
+        [version, job.request_id, notes, channel, build.sha, commit]
       );
       const value = r.rows[0].result;
       if (value.status === 'published') { result = value; break; }
@@ -248,6 +256,13 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`\n✗ ${err.message}`);
+  const message = err?.message ?? String(err);
+  if (/stale fetch/.test(message)) {
+    console.error('\n✗ The bytes fetched were not the build you just made.');
+    console.error('  This is the CDN serving an older copy of the file. Usually it clears in a');
+    console.error('  minute; running the same command again is safe and will pick up the rest.');
+  } else {
+    console.error(`\n✗ ${message}`);
+  }
   process.exit(1);
 });

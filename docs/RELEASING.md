@@ -29,6 +29,11 @@ SUPABASE_DB_URL="postgresql://postgres.srugeztbfxcjuvokhumw:…@…" \
   node tools/publish-release.mjs --version 1.5.0 --notes "What changed, in plain words."
 ```
 
+The published build is fetched from the **commit** you just pushed, never from
+the branch, and its SHA-256 is checked against the file on disk before it is
+allowed to become the newest release. See "Why the source is pinned to a
+commit" below for the failure this prevents.
+
 That is the whole loop. Anyone launching 1.4.0 or later gets 1.5.0.
 
 ---
@@ -55,6 +60,25 @@ verify.
 
 It also keeps the release command small enough to be one step that either fully
 succeeds or fully fails.
+
+### Why the source is pinned to a commit, not a branch
+
+`raw.githubusercontent.com` serves branch URLs through a CDN that keeps handing
+back the *previous* build for a while after a push. Publishing from a branch URL
+therefore risks storing the old html under the new version number — the menu
+would say 1.5.0 while the download was still 1.4.0, and every player would
+"update" to nothing. Commit URLs are immutable, so the bytes fetched are the
+bytes committed.
+
+As a second line of defence the caller states the SHA-256 it built, and
+`aetheris_publish_finish` refuses to publish a body that does not match:
+
+```
+stale fetch: got 745533 bytes sha 1477d61e0d9e, expected deadbeefdead
+```
+
+If you see that, nothing was published and nothing was damaged — run the same
+command again once the CDN catches up.
 
 ### Why publishing is two calls
 
