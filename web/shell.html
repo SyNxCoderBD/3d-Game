@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AETHERIS — Island Warfare</title>
+<style>
+  :root { --ink:#e8efe3; --dim:#9fb2a2; --accent:#7ef7e4; --danger:#ff5b5b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; background:#05070a; overflow:hidden;
+    font-family:"Segoe UI", Inter, system-ui, -apple-system, sans-serif; color:var(--ink); }
+  #boot { position:fixed; inset:0; display:grid; place-items:center; }
+  .card { width:min(520px, 88vw); text-align:left; }
+  .mark { font-size:11px; letter-spacing:.42em; color:var(--accent); text-transform:uppercase; margin-bottom:18px; }
+  h1 { font-size:30px; letter-spacing:.30em; font-weight:600; margin:0 0 22px; }
+  .track { height:2px; background:#131a20; overflow:hidden; margin-bottom:14px; }
+  #bar { width:0%; height:100%; background:linear-gradient(90deg,#6f8f4f,#cfe3a8); transition:width .35s ease; }
+  #status { font-size:10.5px; letter-spacing:.34em; text-transform:uppercase; color:#86a183; min-height:1.4em; }
+  #detail { font-size:12px; color:var(--dim); margin-top:14px; line-height:1.5; white-space:pre-wrap; }
+  #detail a { color:var(--accent); }
+  .err { color:var(--danger) !important; }
+</style>
+</head>
+<body>
+<div id="boot">
+  <div class="card">
+    <div class="mark">AETHERIS — Island Warfare</div>
+    <h1>AETHERIS</h1>
+    <div class="track"><div id="bar"></div></div>
+    <div id="status">Starting</div>
+    <div id="detail"></div>
+  </div>
+</div>
+<script>
+/*
+ * Boot shell.
+ *
+ * This file is small and is meant never to change again. Everything it does is
+ * pick *which copy of the game to open* and then open it:
+ *
+ *   1. ask the release channel (Supabase) what the newest build is;
+ *   2. if that build is already in the browser's cache, open it;
+ *   3. otherwise download it, verify its SHA-256 against the published hash,
+ *      cache it, and open it;
+ *   4. if any of that fails — offline, blocked, hash mismatch, no cache — fall
+ *      back to the copy bundled next to this file.
+ *
+ * That is what makes a deployed copy self-updating. The hosted bytes here never
+ * need to change again: a new release is published to the release channel and
+ * every player's browser picks it up on their next load. The service worker is
+ * what serves the cached build at a stable URL, so reloading the page works
+ * normally instead of pointing at a blob that dies with the document.
+ *
+ * Nothing in here may stop the game from opening. Every step is guarded, and
+ * the last resort is always the bundled build.
+ */
+(function () {
+  'use strict';
+
+  var SUPABASE_URL = '__SUPABASE_URL__';
+  var ANON_KEY = '__SUPABASE_ANON_KEY__';
+  var CHANNEL = '__CHANNEL__';
+  var BUNDLED_VERSION = '__VERSION__';
+
+  /* Remember which version this shell shipped with, in case the channel is
+     unreachable and the cache is empty: the bundled game is that version. */
+  var CACHE_NAME = 'aetheris-game-v1';
+  var PLAY_URL = '/play';
+
+  var bar = document.getElementById('bar');
+  var statusEl = document.getElementById('status');
+  var detailEl = document.getElementById('detail');
+
+  function setStatus(text, pct) {
+    try {
+      if (statusEl) statusEl.textContent = text;
+      if (typeof pct === 'number' && bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    } catch (_) { /* a missing element must never stop the game */ }
+  }
+
+  function setDetail(text, isError) {
+    try {
+      if (!detailEl) return;
+      detailEl.textContent = text || '';
+      detailEl.className = isError ? 'err' : '';
+    } catch (_) { /* ignore */ }
+  }
+
+  /* ---------------------------------------------------------------- version */
+
+  function parseVersion(v) {
+    return String(v || '0').replace(/^v/i, '').split('.').map(function (n) {
+      var x = parseInt(n, 10);
+      return isFinite(x) ? x : 0;
+    });
+  }
+
+  function compareVersions(a, b) {
+    var x = parseVersion(a), y = parseVersion(b);
+    for (var i = 0; i < Math.max(x.length, y.length); i++) {
+      var d = (x[i] || 0) - (y[i] || 0);
+      if (d !== 0) return d > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  /* ------------------------------------------------------------------ hash */
+
+  function toHex(buffer) {
+    var bytes = new Uint8Array(buffer), out = '';
+    for (var i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, '0');
+    return out;
+  }
+
+  async function sha256Hex(text) {
+    var subtle = window.crypto && window.crypto.subtle;
+    if (!subtle) throw new Error('this browser cannot verify downloads (no SubtleCrypto)');
+    var digest = await subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return toHex(digest);
+  }
+
+  /* ------------------------------------------------------------ the channel */
+
+  async function fetchLatest() {
+    var url = SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/' + 'aetheris_releases' +
+      '?select=version,sha256,published&channel=eq.' + encodeURIComponent(CHANNEL) +
+      '&published=eq.true&order=release_no.desc&limit=1';
+    var res = await fetch(url, {
+      headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('release lookup failed (' + res.status + ')');
+    var rows = await res.json();
+    if (!Array.isArray(rows) || !rows.length) return null;
+    var row = rows[0];
+    if (!row || !row.version || !row.sha256) return null;
+    return { version: String(row.version), sha256: String(row.sha256).toLowerCase() };
+  }
+
+  async function fetchPayload(version) {
+    var url = SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/aetheris_release_payload' +
+      '?select=html&version=eq.' + encodeURIComponent(version) + '&limit=1';
+    var res = await fetch(url, {
+      headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('download failed (' + res.status + ')');
+    var rows = await res.json();
+    var html = Array.isArray(rows) && rows.length ? rows[0].html : null;
+    if (typeof html !== 'string' || !html) throw new Error('download was empty');
+    if (!/<!doctype html/i.test(html.slice(0, 200))) throw new Error('download is not a game build');
+    return html;
+  }
+
+  /* ---------------------------------------------------------------- caches */
+
+  function buildKey(version) {
+    return new Request(new URL('/__aetheris-build/' + encodeURIComponent(version), location.origin));
+  }
+
+  async function cachedBuilds() {
+    if (!window.caches) return [];
+    try {
+      var cache = await caches.open(CACHE_NAME);
+      var keys = await cache.keys();
+      var versions = keys
+        .map(function (req) {
+          var m = new URL(req.url).pathname.match(/^\/__aetheris-build\/(.+)$/);
+          return m ? decodeURIComponent(m[1]) : null;
+        })
+        .filter(Boolean);
+      return versions.sort(compareVersions).reverse();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function cacheBuild(version, html) {
+    if (!window.caches) return false;
+    try {
+      var cache = await caches.open(CACHE_NAME);
+      await cache.put(buildKey(version), new Response(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      }));
+      /* Keep the two newest builds: enough to roll back a bad release by hand,
+         bounded so the cache cannot grow without limit. */
+      var all = await cachedBuilds();
+      for (var i = 2; i < all.length; i++) {
+        try { await cache.delete(buildKey(all[i])); } catch (_) { /* keep going */ }
+      }
+      return true;
+    } catch (_) {
+      return false; // quota or private mode; the bundled build still works
+    }
+  }
+
+  /* ------------------------------------------------------------------- open */
+
+  function open(where) {
+    try { location.replace(where); } catch (_) { location.href = where; }
+  }
+
+  function openBundled() {
+    open('/game.html');
+  }
+
+  /* --------------------------------------------------------------- service worker */
+
+  async function registerWorker() {
+    if (!('serviceWorker' in navigator)) return false;
+    if (!window.isSecureContext) return false; // file:// and plain http
+    try {
+      await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /* ------------------------------------------------------------------- main */
+
+  async function main() {
+    setStatus('Checking for a newer build', 10);
+
+    var latest = null;
+    try {
+      latest = await fetchLatest();
+    } catch (err) {
+      setDetail('Could not reach the release channel. Playing the copy that came with this page.', false);
+    }
+
+    var cached = await cachedBuilds();
+    var best = cached[0] || BUNDLED_VERSION;
+
+    /*
+     * Nothing newer, but a cached build exists: open the cached one. That is
+     * how a player who has already downloaded a newer release keeps it after
+     * the shell is reloaded.
+     */
+    if (latest && compareVersions(latest.version, best) > 0) {
+      setStatus('Downloading ' + latest.version, 35);
+      try {
+        var html = await fetchPayload(latest.version);
+        setStatus('Verifying ' + latest.version, 70);
+
+        var digest = await sha256Hex(html);
+        if (digest !== latest.sha256) throw new Error('checksum mismatch');
+
+        setStatus('Installing ' + latest.version, 90);
+        var stored = await cacheBuild(latest.version, html);
+        if (stored) {
+          setStatus('Starting ' + latest.version, 100);
+          /*
+           * Be honest about the one case where the new build needs a nudge: the
+           * running document is this shell, and the game opens from the cache on
+           * the next load. Saying so costs nothing and avoids a support
+           * question if someone sees the old version number in the menu.
+           */
+          try {
+            if (sessionStorage.getItem('aetheris-shell-announced') !== latest.version) {
+              sessionStorage.setItem('aetheris-shell-announced', latest.version);
+              setDetail('Updated to ' + latest.version + '. It is ready now — reload this page to play it.', false);
+              await new Promise(function (r) { setTimeout(r, 900); });
+            }
+          } catch (_) { /* sessionStorage unavailable; not important */ }
+        } else {
+          /* Downloaded and verified, but the browser would not keep it —
+             private mode, a quota cap, or storage turned off. Say so instead of
+             claiming to run a build we are not running. */
+          setDetail('Downloaded ' + latest.version + ' but this browser would not store it ' +
+            '(private browsing or no disk space).\nPlaying the version you already have.');
+        }
+      } catch (err) {
+        /*
+         * A failed or tampered download must never brick the game. Say so
+         * quietly and open whatever we already have.
+         */
+        var msg = err && err.message ? err.message : String(err);
+        setDetail('Update to ' + latest.version + ' did not verify: ' + msg +
+          '\nPlaying the version you already have.', true);
+      }
+    } else {
+      setStatus('Starting', 100);
+    }
+
+    /*
+     * The service worker serves the cached build at /play, so the address bar
+     * keeps a stable URL and reloading works. Without a worker (file://, plain
+     * http, an older browser) /play is a network 404, so go straight to the
+     * bundled copy instead.
+     */
+    var hasWorker = await registerWorker();
+    if (hasWorker && (await cachedBuilds()).length) {
+      open(PLAY_URL);
+      return;
+    }
+    openBundled();
+  }
+
+  main().catch(function (err) {
+    /* Absolute last resort: never leave the player on this screen. */
+    try {
+      setDetail(err && err.message ? err.message : String(err), true);
+      setStatus('Starting bundled build', 100);
+    } catch (_) { /* ignore */ }
+    openBundled();
+  });
+})();
+</script>
+</body>
+</html>

@@ -186,6 +186,26 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.7.0 — the deployed game updates itself
+- **A hosted copy now updates itself.** Previously a static deployment was frozen
+  at whatever you uploaded: publishing a release reached nobody until you
+  redeployed. Now the zip contains a small boot shell (`index.html`) plus the
+  game (`game.html`) and a service worker (`sw.js`).
+- On every load the shell asks the release channel what the newest build is. If
+  it is newer than what the player has, it downloads it, checks its SHA-256
+  against the published hash, caches it, and opens it. Players get new versions
+  on their next visit without you touching the host.
+- The cached build is served at `/play` **on the site's own origin**, via the
+  service worker. That matters: a `blob:` or `data:` URL would be an opaque
+  origin and online multiplayer would break, because CORS requests and the
+  realtime socket arrive as `Origin: null`.
+- **A bad update can never stop anyone playing.** Wrong hash, offline, a blocked
+  download, private mode, or a browser refusing to store the build all fall back
+  to the bundled `game.html` with a plain explanation. The shell also refuses to
+  claim it is running a version it failed to install.
+- The shell is meant to be the last thing you ever redeploy. Only repackage if
+  the fallback build itself should move forward.
+
 ### 1.6.0 — the game is a website now
 - **The Windows executable is gone.** It was a launcher wrapped around the same
   web build, and every problem that survived into this release was a launcher

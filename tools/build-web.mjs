@@ -43,38 +43,39 @@ const README = `AETHERIS - Island Warfare ${VERSION}
 ${'='.repeat(40)}
 
 WHAT THIS IS
-  A complete static website. One file: index.html. It contains the game, its
-  styles and its code. There is nothing to install and nothing to build.
+  A complete static website that keeps itself up to date.
+
+      index.html   the boot shell: picks which build to open (small, stable)
+      game.html    the game as shipped in this zip (the fallback)
+      sw.js        serves a browser-downloaded build at the site's own origin
 
 HOW TO PUT IT ONLINE
-  Any static host works. Unzip and upload index.html.
+  Any static host works. Upload all three files to the same folder.
 
     Netlify      drag the folder onto https://app.netlify.com/drop
     Vercel       vercel deploy --prod  (from this folder)
-    GitHub Pages commit index.html to a repo, enable Pages
+    GitHub Pages commit the three files to a repo, enable Pages
     Cloudflare   wrangler pages deploy .
-    S3 / nginx   copy index.html to the web root
+    S3 / nginx   copy the files to the web root
 
-  Self-hosting in the same folder also works:
+  Must be served over http:// or https:// - not opened as a file. The browser
+  needs a real origin for the service worker and for online multiplayer.
 
-    python3 -m http.server 8080    then open http://localhost:8080/
+SELF-UPDATES
+  On every load the shell asks the release channel what the newest build is.
+  If it is newer than what the player has, it downloads it, checks its SHA-256
+  against the published hash, caches it, and opens it. A released version
+  reaches players on their next visit without you redeploying anything.
 
-  Open it over http:// rather than double-clicking the file. A file:// page is
-  an opaque origin: the browser blocks the cross-origin calls the online
-  multiplayer needs. Single-player works either way.
+  If the download fails, is tampered with, or the player is offline, the game
+  falls back to the copy in this zip and plays normally. The game cannot be
+  broken by a bad update.
 
-WHAT WORKS
-  Everything: split-screen, bot practice, the full weapon set, online rooms.
-
-WHAT IS DIFFERENT FROM THE WINDOWS BUILD
-  The .exe ships its own loopback server, which lets it hand a downloaded
-  update to the launcher for the next start. The web build has no launcher, so
-  it plays the version it was deployed as. Everything else is identical - it is
-  the same game code.
+  The shell (index.html) is meant never to need replacing again. Only repackage
+  if the fallback build itself should move.
 
 CONTROLS
-  Keyboard + mouse, or a gamepad. Both are used in the game itself; the menu
-  has the full list.
+  Keyboard + mouse, or a gamepad. The menu lists the full set.
 `;
 
 function findZip() {
@@ -121,21 +122,52 @@ async function main() {
   await fsp.mkdir(RELEASE, { recursive: true });
 
   /*
-   * release/Aetheris.html is the published artifact: the updater downloads it
-   * from a committed URL, so it must stay committed and byte-stable. It is the
-   * same document as the zip's index.html, just without the README.
+   * release/Aetheris.html is the published artifact: the release channel and
+   * the updater both fetch it from a committed URL, so it must stay committed
+   * and byte-stable.
    */
   await fsp.writeFile(path.join(RELEASE, 'Aetheris.html'), html, 'utf8');
+
+  /*
+   * The deployed site is three files:
+   *
+   *   index.html  the boot shell — small, and meant never to change again
+   *   game.html   this build, used when the shell cannot download a newer one
+   *   sw.js       serves a downloaded build at the site's own origin
+   *
+   * Separation is the whole point: a new release is published to the release
+   * channel, and browsers pick it up through the shell without the hosted
+   * files changing at all.
+   */
+  const shellPath = path.join(ROOT, 'web', 'shell.html');
+  const shellTemplate = await fsp.readFile(shellPath, 'utf8');
+
+  const net = await fsp.readFile(path.join(ROOT, 'src', 'net', 'net.js'), 'utf8');
+  const supabaseUrl = (net.match(/SUPABASE_URL = '([^']+)'/) || [])[1];
+  const anonKey = (net.match(/SUPABASE_ANON_KEY = '([^']+)'/) || [])[1];
+  if (!supabaseUrl || !anonKey) throw new Error('could not read the Supabase credentials from src/net/net.js');
+
+  const shell = shellTemplate
+    .replace('__SUPABASE_URL__', supabaseUrl)
+    .replace('__SUPABASE_ANON_KEY__', anonKey)
+    .replace(/__CHANNEL__/g, 'stable')
+    .replace(/__VERSION__/g, VERSION);
+
+  if (/__[A-Z_]+__/.test(shell)) throw new Error('the boot shell has an unfilled placeholder');
+  if (/<script[^>]*\ssrc=/.test(shell)) throw new Error('the boot shell must stay inline and self-contained');
+  if (!/serviceWorker/.test(shell)) throw new Error('the boot shell lost its service worker wiring');
+
+  const sw = await fsp.readFile(path.join(ROOT, 'web', 'sw.js'), 'utf8');
+  if (!/aetheris-game-v1/.test(sw)) throw new Error('the service worker cache name changed unexpectedly');
 
   const siteDir = path.join(RELEASE, `aetheris-web-${VERSION}`);
   await fsp.rm(siteDir, { recursive: true, force: true });
   await fsp.mkdir(siteDir, { recursive: true });
-  await fsp.writeFile(path.join(siteDir, 'index.html'), html, 'utf8');
+  await fsp.writeFile(path.join(siteDir, 'index.html'), shell, 'utf8');
+  await fsp.writeFile(path.join(siteDir, 'game.html'), html, 'utf8');
+  await fsp.writeFile(path.join(siteDir, 'sw.js'), sw, 'utf8');
   await fsp.writeFile(path.join(siteDir, 'README.txt'), README, 'utf8');
-
-  // 404 is served by most hosts for unknown paths; give them the game rather
-  // than a bare error if someone mistypes the URL.
-  await fsp.copyFile(path.join(siteDir, 'index.html'), path.join(siteDir, '404.html'));
+  console.log(`  site: index.html (${(Buffer.byteLength(shell) / 1024).toFixed(1)} KB shell) + game.html (${(Buffer.byteLength(html) / 1024).toFixed(0)} KB) + sw.js`);
 
   const zipPath = path.join(RELEASE, `Aetheris-web-${VERSION}.zip`);
   await fsp.rm(zipPath, { force: true });
