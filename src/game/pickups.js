@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { createWeaponModel } from './weapons.js';
+import { createWeaponModel, WEAPON_IDS } from './weapons.js';
 
 const RING_GEO = new THREE.RingGeometry(0.5, 0.72, 26);
 const BEAM_GEO = new THREE.CylinderGeometry(0.34, 0.5, 2.6, 10, 1, true);
@@ -118,7 +118,11 @@ export class Pickups {
     list.forEach((entry) => this.addItem(entry.type, entry.spot));
   }
 
-  addItem(type, spot) {
+  /**
+   * Add a loot item at a world spot. `drop` items are transient: they are
+   * removed (not respawned) after a while or once collected.
+   */
+  addItem(type, spot, drop = null) {
     const holder = new THREE.Group();
     holder.position.set(spot.x, spot.y + 0.55, spot.z);
 
@@ -160,23 +164,52 @@ export class Pickups {
       position: new THREE.Vector3(spot.x, spot.y + 0.55, spot.z),
       ground: spot.y,
       active: true,
+      drop: !!drop,
+      ttl: drop ? 45 : 0,
+      spawnT: 0,
       respawn: 0,
       spin: Math.random() * Math.PI * 2,
     });
+    return this.items[this.items.length - 1];
+  }
+
+  /** A fighter died: leave their primary weapon on the ground for grabs. */
+  dropFrom(fighter) {
+    const slot = fighter.slots[fighter.slot];
+    if (!slot || !fighter.alive) return null;
+    const def = WEAPON_IDS.includes(slot.id) ? slot.id : 'rifle';
+    const x = fighter.position.x;
+    const z = fighter.position.z;
+    const item = this.addItem(def, { x, y: fighter.position.y + 0.1, z }, 'drop');
+    item.active = true;
+    item.spin = 0;
+    item.holder.scale.setScalar(0.01);
+    return item;
   }
 
   update(dt, fighters) {
     this.time += dt;
 
-    for (const item of this.items) {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const item = this.items[i];
       if (!item.active) {
-        item.respawn -= dt;
-        if (item.respawn <= 0) {
-          item.active = true;
-          item.holder.visible = true;
-          item.holder.scale.setScalar(0.01);
+        if (item.drop) {
+          // Collected drops disappear instantly; untouched ones expire.
+          if (item.respawn <= 0) this.removeItem(item, i);
+        } else {
+          item.respawn -= dt;
+          if (item.respawn <= 0) {
+            item.active = true;
+            item.holder.visible = true;
+            item.holder.scale.setScalar(0.01);
+          }
         }
         continue;
+      }
+
+      if (item.drop) {
+        item.ttl -= dt;
+        if (item.ttl <= 0) { this.removeItem(item, i); continue; }
       }
 
       item.spin += dt * 0.9;
@@ -197,13 +230,22 @@ export class Pickups {
           if (this.collect(item, f)) {
             item.active = false;
             item.holder.visible = false;
-            item.respawn = 16 + Math.random() * 8;
+            if (item.drop) {
+              this.removeItem(item, i);
+            } else {
+              item.respawn = 16 + Math.random() * 8;
+            }
             this.onCollect?.(f, item.type);
             break;
           }
         }
       }
     }
+  }
+
+  removeItem(item, index) {
+    this.group.remove(item.holder);
+    this.items.splice(index, 1);
   }
 
   collect(item, fighter) {

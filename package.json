@@ -1,6 +1,6 @@
 {
   "name": "aetheris",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "AETHERIS \u2014 Island Warfare: split-screen FPS with procedural weapons, characters, bots and loot, shipped as a single portable Windows executable.",
@@ -11,7 +11,8 @@
     "build:exe": "node tools/build-exe.mjs",
     "verify": "node tools/verify-world.mjs",
     "verify:shaders": "node tools/check-shaders.mjs",
-    "verify:game": "node tools/verify-game.mjs"
+    "verify:game": "node tools/verify-game.mjs",
+    "verify:e2e": "vite build && node tools/e2e-run.mjs"
   },
   "dependencies": {
     "three": "0.169.0"

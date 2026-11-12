@@ -4,7 +4,7 @@ import { clamp } from '../util/math.js';
 const EMPTY = () => ({
   forward: 0, strafe: 0, lookX: 0, lookY: 0,
   jump: false, sprint: false, crouch: false,
-  fire: false, aim: false, reload: false, swap: false, med: false,
+  fire: false, aim: false, reload: false, swap: false, slot: 0, med: false,
 });
 
 function angleDelta(from, to) {
@@ -50,6 +50,38 @@ export class BotBrain {
     this.think = 0;
     this.stuckTimer = 0;
     this.lastPos = { x: 0, z: 0 };
+    this.slotTimer = 0;
+  }
+
+  /**
+   * Pick the best gun for the current range: shotgun up close, sniper across
+   * open ground, rifle/smg in between. Bots only carry what they've looted.
+   */
+  chooseSlot(dist) {
+    const f = this.f;
+    if (!dist) return;
+    let wanted;
+    if (dist < 14) wanted = 'shotgun';
+    else if (dist > 55) wanted = 'sniper';
+    else wanted = 'rifle';
+    if (f.weapon.id === wanted) return;
+
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < f.slots.length; i++) {
+      const slot = f.slots[i];
+      if (!slot || i === f.slot) continue;
+      const base = { shotgun: 3, smg: 2, rifle: 4, sniper: 3, pistol: 1 }[slot.id] ?? 0;
+      // Prefer the ideal gun, then whatever else is loaded and sensible.
+      let score = slot.id === wanted ? 10 : base;
+      if (slot.ammo + slot.reserve <= 0) score -= 20;
+      if (dist < 18 && slot.id === 'sniper') score -= 8;
+      if (dist > 45 && slot.id === 'shotgun') score -= 8;
+      if (dist > 18 && dist < 45 && slot.id === 'shotgun') score -= 1.5;
+      if (slot.id === 'pistol') score -= 2;
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    }
+    if (bestIdx >= 0 && bestScore > 0) f.selectSlot(bestIdx);
   }
 
   pickWaypoint() {
@@ -136,9 +168,21 @@ export class BotBrain {
 
       out.sprint = dist > 45;
 
+      // ---- weapon choice ----------------------------------------------
+      this.slotTimer -= dt;
+      if (this.slotTimer <= 0) {
+        this.slotTimer = 1.5;
+        this.chooseSlot(dist);
+      }
+
       // ---- shooting ---------------------------------------------------
-      const wantFire = aimAligned && dist < 75 && f.slotData.ammo > 0;
-      if (f.slotData.ammo === 0) out.reload = true;
+      const wantFire = aimAligned && dist < f.weapon.range + 10 && f.slotData.ammo > 0;
+      if (f.slotData.ammo === 0) {
+        // Grab a loaded gun rather than standing still reloading under fire.
+        const loaded = f.slots.some((s2, i2) => i2 !== f.slot && s2 && s2.ammo > 0);
+        if (loaded && dist < 30) out.swap = true;
+        else out.reload = true;
+      }
 
       this.burstCooldown -= dt;
       if (wantFire && this.burstCooldown <= 0) {

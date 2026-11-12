@@ -3,6 +3,7 @@ import { WORLD } from '../world/heightfield.js';
 import { sampleHeight } from '../world/heightgrid.js';
 
 const MAP_R = 480;
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const _v = new THREE.Vector3();
 
 /** Top-down island image used by both minimaps. */
@@ -47,12 +48,23 @@ export function buildIslandImage(size = 256) {
 
 const PANE_TEMPLATE = `
   <div class="damage-flash"></div>
+  <div class="scope">
+    <div class="scope-ring"></div>
+    <div class="scope-cross v"></div>
+    <div class="scope-cross h"></div>
+    <div class="scope-mildots"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="scope-label">AWM .338</div>
+  </div>
+  <div class="dmg-dirs"></div>
   <div class="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
+  <div class="reload-ring"><svg viewBox="0 0 44 44"><circle class="track" cx="22" cy="22" r="18"></circle><circle class="fill" cx="22" cy="22" r="18"></circle></svg></div>
   <div class="hitmarker">✕</div>
   <div class="topline">
     <span class="pname"></span>
     <span class="score">0</span>
+    <span class="clock"></span>
   </div>
+  <div class="streak"></div>
   <div class="minimap">
     <canvas width="176" height="176"></canvas>
     <div class="mmlabel">N</div>
@@ -116,6 +128,15 @@ export class Hud {
         death: el.querySelector('.deathscreen'),
         deathSub: el.querySelector('.dsub'),
         crosshair: el.querySelector('.crosshair'),
+        reloadRing: el.querySelector('.reload-ring'),
+        reloadFill: el.querySelector('.reload-ring .fill'),
+        scope: el.querySelector('.scope'),
+        scopeLabel: el.querySelector('.scope-label'),
+        dmgDirs: el.querySelector('.dmg-dirs'),
+        clock: el.querySelector('.clock'),
+        streakEl: el.querySelector('.streak'),
+        streakTimer: 0,
+        lastSlot: -1,
         hitTimer: 0,
         damageTimer: 0,
         toastTimer: 0,
@@ -205,15 +226,50 @@ export class Hud {
 
     pane.death.classList.toggle('show', !fighter.alive);
     if (!fighter.alive) {
-      pane.deathSub.textContent = `RESPAWN IN ${Math.max(0, fighter.respawnTimer).toFixed(1)}s`;
+      pane.deathSub.textContent = `SPECTATING · RESPAWN IN ${Math.max(0, fighter.respawnTimer).toFixed(1)}s`;
       pane.crosshair.style.opacity = '0';
     } else {
-      pane.crosshair.style.opacity = '1';
+      const scoped = def.kind === 'sniper' && fighter.aimT > 0.82;
+      pane.crosshair.style.opacity = scoped ? '0' : '1';
     }
 
     const reloading = fighter.reloading > 0;
     pane.crosshair.classList.toggle('reloading', reloading);
+    if (reloading) {
+      const t = clamp01(1 - fighter.reloading / def.reloadTime);
+      pane.reloadFill.style.strokeDashoffset = String(113 * (1 - t));
+      pane.reloadRing.classList.add('show');
+    } else {
+      pane.reloadRing.classList.remove('show');
+    }
     pane.crosshair.classList.toggle('ads', fighter.aimT > 0.5);
+
+    // Sniper scope overlay: only while fully zoomed.
+    const scoped = def.kind === 'sniper' && fighter.aimT > 0.82;
+    pane.scope.classList.toggle('show', scoped);
+    if (pane.scopeLabel) pane.scopeLabel.textContent = def.name;
+
+    // Weapon swap flash on the name plate.
+    if (pane.lastSlot !== fighter.slot) {
+      pane.lastSlot = fighter.slot;
+      pane.wname.classList.remove('swap');
+      void pane.wname.offsetWidth;
+      pane.wname.classList.add('swap');
+    }
+
+    // Damage direction arrows fade out.
+    if (pane.dmgDirs.childElementCount) {
+      for (const arrow of [...pane.dmgDirs.children]) {
+        arrow.life -= dt;
+        if (arrow.life <= 0) arrow.remove();
+        else arrow.style.opacity = Math.min(1, arrow.life / 0.5);
+      }
+    }
+
+    if (pane.streakTimer > 0) {
+      pane.streakTimer -= dt;
+      if (pane.streakTimer <= 0) pane.streakEl.classList.remove('show');
+    }
 
     this.drawMinimap(pane, fighter, others, pickups);
     this.updateOpponentMarker(pane, fighter, others, camera);
@@ -337,6 +393,40 @@ export class Hud {
     pane.oppTxt.textContent = `${target.name} · ${Math.round(bestD)}m`;
   }
 
+  setClock(text) {
+    for (const pane of this.panes) pane.clock.textContent = text;
+  }
+
+  setClockWarning(on) {
+    for (const pane of this.panes) pane.clock.classList.toggle('urgent', on);
+  }
+
+  /**
+   * Rotating chevron at the edge of the view pointing at where fire came
+   * from. `angle` is the world-space bearing from the victim to the shooter.
+   */
+  showDamageDirection(index, angle) {
+    const pane = this.panes[index];
+    if (!pane) return;
+    const arrow = document.createElement('div');
+    arrow.className = 'dmg-dir';
+    arrow.style.transform = `rotate(${angle}rad)`;
+    arrow.innerHTML = '<span></span>';
+    arrow.life = 1.6;
+    pane.dmgDirs.appendChild(arrow);
+    while (pane.dmgDirs.childElementCount > 4) pane.dmgDirs.firstElementChild.remove();
+  }
+
+  showStreak(index, text) {
+    const pane = this.panes[index];
+    if (!pane || !pane.streakEl) return;
+    pane.streakEl.textContent = text;
+    pane.streakEl.classList.remove('show');
+    void pane.streakEl.offsetWidth;
+    pane.streakEl.classList.add('show');
+    pane.streakTimer = 2.4;
+  }
+
   setSpectating(index, on) {
     const pane = this.panes[index];
     if (!pane) return;
@@ -346,5 +436,27 @@ export class Hud {
   destroy() {
     this.root.innerHTML = '';
     this.panes = [];
+  }
+
+  /**
+   * Fill the victory overlay: headline, reason line and a ranked table.
+   * columns: ['K','D','ACC','DMG','HS']   rows: [{name, values: [...], me}]
+   */
+  renderEndcard(headline, sub, columns, rows) {
+    const body = rows.map((r, i) => `
+      <tr class="${r.me ? 'me' : ''}">
+        <td class="rank">${i + 1}</td>
+        <td class="who">${r.name}</td>
+        ${r.values.map((v) => `<td>${v}</td>`).join('')}
+      </tr>`).join('');
+    return `
+      <div class="overlayTitle">${headline}</div>
+      <div class="overlaySub">${sub}</div>
+      <table class="scoreboard">
+        <thead>
+          <tr><th class="rank">#</th><th class="who">PLAYER</th>${columns.map((c) => `<th>${c}</th>`).join('')}</tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>`;
   }
 }

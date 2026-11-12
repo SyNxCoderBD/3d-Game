@@ -9,9 +9,12 @@ Or drop in solo against AI squads in bot practice.
 It ships as **one portable Windows executable**.
 
 ```
-release/Aetheris.exe      ← double-click. That's it. (~0.6 MB)
+release/Aetheris.exe      ← double-click. That's it. (~0.7 MB)
 release/Aetheris.html     ← same build, opens in any browser
 ```
+
+Everything below the menus was built from scratch: the island, the soldiers,
+the guns, the hit detection, and every gunshot you hear.
 
 ---
 
@@ -36,10 +39,13 @@ both); Chrome, Brave and Vivaldi are also detected.
 ## Modes
 
 * **1P · Bot Practice** — you against 2–8 AI soldiers. Bots patrol the island,
-  take line-of-sight shots, circle-strafe, heal themselves and loot.
+  take line-of-sight shots, circle-strafe, heal themselves, loot, and swap to
+  the right gun for the range they're fighting at. The run ends when you do.
 * **2P · Split Screen Duel** — Player 1 (keyboard + mouse) versus Player 2
-  (controller), first to 15 eliminations. Each half of the screen has its own
-  camera, HUD, minimap and enemy tracker.
+  (controller, or IJKL + arrows if no pad is connected). Pick a score limit of
+  10, 15, 20 or 30 and go; there is also an 8-minute clock, and if time runs out
+  the scoreboard leader takes the match. Each half of the screen has its own
+  camera, HUD, minimap, enemy tracker and damage direction.
 
 ## Controls
 
@@ -62,10 +68,25 @@ both); Chrome, Brave and Vivaldi are also detected.
 | Input | Action |
 | --- | --- |
 | Left stick / right stick | Move / look |
-| `RT` / `LT` | Fire / aim |
+| `RT` / `LT` | Fire / aim down sights |
 | `A` | Jump |
 | `X` / `Y` / `B` | Reload / med kit / swap weapon |
 | `LB` / `R3` | Sprint / crouch |
+| `D-pad ← →` | Weapon slot 1 / 2 |
+
+Rumble fires on shots, hits and death (toggle it in the pause menu). Aim assist
+gives pad players a gentle pull toward visible enemies — it never snaps.
+
+**Player 2 — no controller? keyboard fallback**
+
+| Input | Action |
+| --- | --- |
+| `I J K L` | Move |
+| `Arrow keys` | Look |
+| `Enter` / `Right Shift` | Fire / aim |
+| `'` | Jump |
+| `\` / `Right Ctrl` | Sprint / crouch |
+| `,` / `.` / `/` | Med kit / reload / swap weapon |
 
 If a browser refuses pointer lock, the game falls back to **hold left mouse and
 drag** to look.
@@ -83,6 +104,13 @@ drag** to look.
 Headshots multiply damage (1.6×–2.6×), damage falls off with range and every
 fighter starts with spawn protection. Loot on the ground: weapons, ammo boxes,
 med kits (+1 kit, heals 55 HP) and body armour (absorbs 55 % of incoming damage).
+You carry three weapon slots (primary + sidearm + looted gun); `1 2 3` selects
+one directly. When a fighter dies, the gun in their hands drops on the ground —
+kill someone with a sniper and you can take it.
+
+The AWM's scope is a real magnified lens: the 3D view is re-rendered at 2.7×
+zoom through a circular scissor region, with black outside the lens, mildots
+and reduced look sensitivity while zoomed.
 
 If a browser refuses pointer lock (some locked-down machines do), the game
 falls back automatically: **hold the left mouse button and drag** to look.
@@ -101,7 +129,16 @@ falls back automatically: **hold the left mouse button and drag** to look.
   stock, grip, charging handle). Merged per material so a gun costs 4–5 draw
   calls instead of 30.
 * **Feedback** — muzzle flash, tracer streaks, impact sparks, blood puffs,
-  recoil kick, hit markers and a kill feed.
+  recoil kick, animated hit markers, kill feed, damage-direction chevrons,
+  streaks ("RAMPAGE" at 5 kills) and a reload ring around the crosshair.
+* **Audio** — every weapon has its own synthesised report (noise crack through
+  a bandpass + pitched body thump + a delayed tail for big calibers), plus
+  reload clicks, hit confirmations, damage, death, loot pickups and match
+  stings. Distant gunfire is distance-attenuated and stereo-panned against the
+  nearest split-screen camera, so you can hear which shoulder it came from.
+* **Match flow** — score/time limits, live clock, per-fighter K/D/accuracy/
+  damage/headshot/best-streak stats, and an end-of-match scoreboard with
+  rematch.
 
 ## What is in the world
 
@@ -134,7 +171,7 @@ falls back automatically: **hold the left mouse button and drag** to look.
   steps down resolution, then shadows, then bloom.
 
 Everything — geometry, textures, sound — is generated at runtime, which is why
-the whole game fits in 533 KB of executable payload.
+the whole game fits in roughly 630 KB of executable payload.
 
 ## Development
 
@@ -143,7 +180,9 @@ npm install
 npm run dev            # http://localhost:5173 (live preview)
 npm run build:exe      # → release/Aetheris.exe + release/Aetheris.html
 npm run verify         # headless world build smoke test (no GPU needed)
-npm run verify:game    # headless combat/AI/pickup simulation test
+npm run verify:game    # headless combat/AI/pickup/match/audio simulation test
+npm run verify:e2e     # runs the real bundle in a stub DOM: menu → match → pause
+                       # → split screen → scoreboard → rematch
 npm run verify:shaders # GLSL syntax check for every shader source
 ```
 
@@ -179,10 +218,12 @@ src/game/weapons.js     weapon stats + procedural gun models
 src/game/combat.js      hitscan, damage, tracers/sparks/blood
 src/game/ai.js          bot brains (patrol, engage, strafe, heal)
 src/game/pickups.js     loot spawns, models and collection
-src/game/input.js       keyboard/mouse + gamepad input
+src/game/input.js       keyboard/mouse, gamepad + P2 keyboard fallback
+src/game/match.js       score/time limits, stats, streaks, standings
 src/game/spawns.js      spawn & loot placement
 src/ui/hud.js           per-player HUD, minimap, enemy tracker
 src/audio/ambience.js   procedural wind + drone
+src/audio/sfx.js        procedural guns, reloads, hits, match stings
 launcher/launcher.c     Win32 launcher (no dependencies)
 tools/build-exe.mjs     single-file packager
 ```

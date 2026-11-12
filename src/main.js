@@ -10,7 +10,10 @@ import { Effects } from './game/combat.js';
 import { Fighter } from './game/fighter.js';
 import { BotBrain } from './game/ai.js';
 import { Pickups } from './game/pickups.js';
-import { KeyboardMouseInput, GamepadInput } from './game/input.js';
+import { KeyboardMouseInput, GamepadInput, KeyboardSecondInput } from './game/input.js';
+import { Match } from './game/match.js';
+import { Sfx } from './audio/sfx.js';
+import { WEAPONS } from './game/weapons.js';
 import { buildSpawnPoints, buildPickupSpots } from './game/spawns.js';
 import { Hud } from './ui/hud.js';
 import { Ambience } from './audio/ambience.js';
@@ -146,6 +149,21 @@ async function buildWorld() {
 
 /* ------------------------------------------------------------- game state */
 
+const settings = {
+  volume: 0.9,
+  quality: 'auto',
+  rumble: true,
+};
+
+try {
+  const saved = JSON.parse(localStorage.getItem('aetheris.settings') || 'null');
+  if (saved && typeof saved === 'object') Object.assign(settings, saved);
+} catch (_) { /* private mode */ }
+
+function saveSettings() {
+  try { localStorage.setItem('aetheris.settings', JSON.stringify(settings)); } catch (_) { /* ignore */ }
+}
+
 const game = {
   mode: null,             // 'solo' | 'duo'
   fighters: [],
@@ -153,20 +171,26 @@ const game = {
   bots: [],
   brains: [],
   pickups: null,
-  hud: null,
   paused: true,
   running: false,
   over: false,
   spawnPoints: [],
   killLimit: 15,
+  timeLimit: 0,           // 0 = no clock
   cam1: null,
   cam2: null,
   input1: null,
   input2: null,
   menuT: 0,
+  match: null,
+  spectate: [null, null],
+  botCount: 4,
 };
 
 const ambience = new Ambience();
+ambience.volume = settings.volume;
+const sfx = new Sfx();
+sfx.setMuted(false);
 const hud = new Hud($('hudRoot'));
 
 function makeCamera() {
@@ -175,6 +199,17 @@ function makeCamera() {
   scene.add(cam);
   return cam;
 }
+
+function createMatchFor(mode, killLimit) {
+  const match = new Match({
+    mode,
+    killLimit: mode === 'duo' ? killLimit : 0,
+    timeLimit: mode === 'duo' ? 420 : 0,
+  });
+  return match;
+}
+
+/* ------------------------------------------------------------- match flow */
 
 function clearMatch() {
   for (const f of game.fighters) {
@@ -185,6 +220,7 @@ function clearMatch() {
   game.locals = [];
   game.bots = [];
   game.brains = [];
+  game.spectate = [null, null];
   if (game.pickups) {
     scene.remove(game.pickups.group);
     game.pickups = null;
@@ -195,27 +231,99 @@ function clearMatch() {
   game.cam2 = null;
   game.input1 = null;
   game.input2 = null;
+  game.match = null;
+  if (effects) effects.clear?.();
   hud.destroy();
 }
 
-function startMatch(mode, botCount = 4) {
+/** Attach every feedback hook a fighter can fire. `idx` is its HUD pane. */
+function wireFighter(f, idx) {
+  const match = game.match;
+
+  f.onShot = (def, muzzle) => {
+    if (match) match.shot(f);
+    sfx.shot(def.kind, muzzle, f.isLocal);
+    if (f.isLocal) {
+      // Muzzle flash + controller kick for pad shooters.
+      f.flashTimer = Math.max(f.flashTimer, 0.04);
+      if (f.inputSource === 'pad' && settings.rumble) {
+        const kick = def.kind === 'shotgun' || def.kind === 'sniper' ? 0.85 : 0.42;
+        game.input2?.rumble(kick, 70, 0.3);
+      }
+    }
+  };
+  f.onEmpty = () => sfx.emptyClick();
+  f.onReloadStart = (def) => { if (f.isLocal) sfx.reloadStart(def.kind); };
+  f.onReloadEnd = () => { if (f.isLocal) sfx.reloadEnd(); };
+  f.onHeal = () => { if (f.isLocal) sfx.heal(); };
+  f.onSwap = () => { if (f.isLocal) sfx.reloadStart('pistol'); };
+
+  f.onHit = (victim, headshot) => {
+    if (idx >= 0 && idx < game.locals.length) {
+      hud.flashHit(idx, headshot);
+      sfx.hit(headshot);
+      sfx.flesh();
+    }
+  };
+
+  f.onDamage = (amount, from, headshot) => {
+    if (match && from) match.hit(from, headshot, amount);
+    if (idx >= 0 && idx < game.locals.length) {
+      hud.flashDamage(idx);
+      sfx.hurt();
+      if (f.lastHitAngle !== undefined) hud.showDamageDirection(idx, f.lastHitAngle);
+      if (f.inputSource === 'pad' && settings.rumble) game.input2?.rumble(0.7, 160, 0.5);
+    }
+  };
+
+  f.onDeath = (killer) => {
+    const res = match ? match.kill(killer, f) : null;
+    // Leave the victim's gun behind as transient loot.
+    if (game.pickups && f.slots[f.slot]) game.pickups.dropFrom(f);
+    const local = game.locals.includes(f);
+    const color = killer && game.locals.includes(killer) ? '#7ef7e4' : '#ffb0a0';
+    const text = killer && killer !== f
+      ? `${killer.name} ⟶ ${f.name}${res?.headshot ? ' ☠' : ''}`
+      : `${f.name} ELIMINATED`;
+    hud.addFeed(text, color);
+    if (local) {
+      sfx.death();
+      if (f.inputSource === 'pad' && settings.rumble) game.input2?.rumble(1, 400, 0.8);
+    }
+    if (killer && game.locals.includes(killer)) {
+      const kIdx = game.locals.indexOf(killer);
+      if (res?.milestone) {
+        hud.showStreak(kIdx, res.milestone);
+        sfx.streak(res.streak);
+      }
+      if (res?.revenge) hud.toast(kIdx, 'REVENGE');
+    }
+    if (res?.over) endMatch();
+  };
+}
+
+function startMatch(mode, botCount = 4, killLimit = 15) {
   clearMatch();
   game.mode = mode;
   game.over = false;
   game.paused = false;
   game.running = true;
+  game.botCount = botCount;
+  game.killLimit = killLimit;
+  game.match = createMatchFor(mode, killLimit);
   game.spawnPoints = buildSpawnPoints(mode === 'duo' ? 16 : 14);
 
-  const spots = buildPickupSpots(20);
+  const spots = buildPickupSpots(mode === 'duo' ? 26 : 22);
   game.pickups = new Pickups(scene, spots);
   game.pickups.onCollect = (fighter, type) => {
     const idx = game.locals.indexOf(fighter);
     if (idx >= 0) {
-      const label = type === 'medkit' ? 'MEDKIT'
-        : type === 'ammo' ? 'AMMO'
+      const label = type === 'medkit' ? 'MEDKIT +1'
+        : type === 'ammo' ? 'AMMO RESUPPLY'
         : type === 'armor' ? 'BODY ARMOR'
-        : `${type.toUpperCase()} PICKED UP`;
+        : `${(WEAPONS[type]?.short || type.toUpperCase())} EQUIPPED`;
       hud.toast(idx, label);
+      sfx.pickup(type);
     }
   };
 
@@ -224,12 +332,11 @@ function startMatch(mode, botCount = 4) {
   game.cam1.layers.enable(1);   // own viewmodel + own grass
   game.cam1.layers.enable(2);   // player 2's body
   const p1 = new Fighter({
-    id: 'p1', name: 'PLAYER 1 👾', scene,
-    camera: game.cam1, bodyLayer: mode === 'duo' ? 4 : 4, viewLayer: 1,
+    id: 'p1', name: 'PLAYER 1', scene,
+    camera: game.cam1, bodyLayer: 4, viewLayer: 1,
     palette: 'p1', spawnPoints: game.spawnPoints,
   });
-  p1.slot = 0;
-  game.cam1.position.set(0, 0, 0);
+  p1.inputSource = 'kbm';
   game.fighters.push(p1);
   game.locals.push(p1);
 
@@ -240,25 +347,35 @@ function startMatch(mode, botCount = 4) {
   };
   game.input1.onFallbackMode = () => hud.toast(0, 'HOLD LEFT MOUSE TO LOOK');
 
-  // --- player 2 (controller)
+  // --- player 2 (controller, or the keyboard fallback)
   if (mode === 'duo') {
     game.cam2 = makeCamera();
     game.cam2.layers.enable(3);
     game.cam2.layers.enable(4);
     const p2 = new Fighter({
-      id: 'p2', name: 'PLAYER 2 🎮', scene,
+      id: 'p2', name: 'PLAYER 2', scene,
       camera: game.cam2, bodyLayer: 2, viewLayer: 3,
       palette: 'p2', spawnPoints: game.spawnPoints,
     });
+    const pad = new GamepadInput(0);
+    if (pad.connected) {
+      game.input2 = pad;
+      p2.inputSource = 'pad';
+    } else {
+      game.input2 = new KeyboardSecondInput();
+      p2.inputSource = 'keys2';
+      hud.toast(0, 'P2: NO CONTROLLER — IJKL + ARROWS');
+    }
+    // Pads are less precise than a mouse: give them a light aim assist.
+    p2.aimAssist = p2.inputSource === 'pad';
+    game.input2.enabled = true;
     game.fighters.push(p2);
     game.locals.push(p2);
-    game.input2 = new GamepadInput(0);
-    game.input2.enabled = true;
   }
 
   // --- bots
   if (mode === 'solo') {
-    const names = ['VIPER', 'RAVEN', 'GHOST', 'HAVOC', 'ONYX', 'JACKAL', 'SPECTRE'];
+    const names = ['VIPER', 'RAVEN', 'GHOST', 'HAVOC', 'ONYX', 'JACKAL', 'SPECTRE', 'TALON'];
     for (let i = 0; i < botCount; i++) {
       const bot = new Fighter({
         id: `bot${i}`, name: names[i % names.length], scene, isBot: true,
@@ -271,35 +388,36 @@ function startMatch(mode, botCount = 4) {
     }
   }
 
-  // spawn everyone
+  // spawn everyone, keeping the two duelists apart
   const shuffled = [...game.spawnPoints].sort(() => Math.random() - 0.5);
   game.fighters.forEach((f, i) => {
     const sp = shuffled[i % shuffled.length];
     f.spawnAt(sp.position, sp.yaw);
   });
+  game.match?.reset();
+  game.fighters.forEach((f) => game.match.stat(f));
 
   // HUD
   hud.createPanes(game.locals.length);
   hud.setNames(game.locals.map((f) => f.name));
+  hud.setClock(game.match?.clock ?? '∞');
 
   // wire feedback
   game.locals.forEach((f, idx) => {
-    f.onHit = (victim, headshot) => hud.flashHit(idx, headshot);
-    f.onDamage = () => hud.flashDamage(idx);
-    f.onDeath = (killer) => {
-      const text = killer && killer !== f ? `${killer.name} ⟶ ${f.name}` : `${f.name} ELIMINATED`;
-      hud.addFeed(text, killer === game.locals[0] ? '#7ef7e4' : '#ffb0a0');
+    wireFighter(f, idx);
+    f.onRespawn = () => {
+      game.spectate[idx] = null;
+      sfx.spawn();
     };
   });
-  game.fighters.forEach((f) => {
-    if (!f.isBot) return;
-    f.onDeath = (killer) => {
-      hud.addFeed(
-        killer ? `${killer.name} ⟶ ${f.name}` : `${f.name} ELIMINATED`,
-        killer && game.locals.includes(killer) ? '#7ef7e4' : '#ffb9a8'
-      );
-    };
-  });
+  game.bots.forEach((f) => wireFighter(f, -1));
+
+  // audio
+  ambience.start();
+  if (ambience.ctx) sfx.attach(ambience.ctx);
+  sfx.setListeners([game.cam1, game.cam2]);
+  sfx.setMuted(settings.volume <= 0);
+  sfx.volume = settings.volume;
 
   $('menu').classList.remove('show');
   $('pause').classList.remove('show');
@@ -307,16 +425,67 @@ function startMatch(mode, botCount = 4) {
   hud.root.classList.add('show');
   document.body.classList.add('playing');
 
-  if (mode === 'duo') {
-    game.input1.requestLock();
-  } else {
-    game.input1.requestLock();
-  }
-  ambience.start();
+  game.input1.requestLock();
   clock.getDelta();
 }
 
+function formatReasons(match, winner) {
+  if (match.reason === 'time') return winner ? 'TIME UP · HIGHEST SCORE WINS' : 'TIME UP · DRAW';
+  if (match.reason === 'eliminated') return 'YOU WERE ELIMINATED';
+  return winner ? `${match.killLimit} ELIMINATIONS` : '';
+}
+
+function endMatch() {
+  const match = game.match;
+  if (!match || game.over) return;
+  game.over = true;
+  game.paused = true;           // freezes simulate(), keeps the arena rendered
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  const winner = match.resolveTimeoutWinner(game.fighters);
+
+  if (game.input1) game.input1.enabled = false;
+  if (game.input2) game.input2.enabled = false;
+  document.body.classList.remove('playing');
+
+  // "me" marks all local players so a split-screen scoreboard reads clearly.
+  const rows = match.results(game.fighters).map((r) => ({
+    name: r.name,
+    values: [
+      r.kills,
+      r.deaths,
+      `${Math.round(r.accuracy * 100)}%`,
+      r.damage,
+      r.headshots,
+      r.bestStreak,
+    ],
+    me: game.locals.includes(r.fighter),
+  }));
+
+  let headline;
+  if (game.mode === 'duo') {
+    headline = winner ? `${winner.name} WINS` : 'DRAW';
+  } else {
+    const you = match.results(game.fighters).find((r) => !r.fighter.isBot);
+    headline = winner && winner.isBot ? `${winner.name} WINS` : 'RUN OVER';
+    if (you) headline += ` · ${you.kills} KILLS`;
+  }
+
+  const sub = `${formatReasons(match, winner)}${game.mode === 'solo'
+    ? `  ·  ${rows[0]?.values[0] ?? 0} KILLS` : ''}`;
+
+  const body = $('victoryBody');
+  body.innerHTML = hud.renderEndcard(
+    headline, sub,
+    ['K', 'D', 'ACC', 'DMG', 'HS', 'STREAK'],
+    rows.slice(0, game.mode === 'duo' ? 2 : 8)
+  );
+  $('victory').classList.add('show');
+  sfx.announce('victory');
+}
+
 function pauseGame() {
+  if (game.over) return;
   game.paused = true;
   $('pause').classList.add('show');
   document.body.classList.remove('playing');
@@ -325,6 +494,7 @@ function pauseGame() {
 }
 
 function resumeGame() {
+  if (game.over) return;
   game.paused = false;
   $('pause').classList.remove('show');
   document.body.classList.add('playing');
@@ -337,6 +507,8 @@ function resumeGame() {
 function quitToMenu() {
   game.running = false;
   game.paused = true;
+  game.over = false;
+  resetViews();
   clearMatch();
   hud.root.classList.remove('show');
   document.body.classList.remove('playing');
@@ -344,6 +516,7 @@ function quitToMenu() {
   $('victory').classList.remove('show');
   $('menu').classList.add('show');
   if (document.pointerLockElement) document.exitPointerLock();
+  updatePadStatus();
 }
 
 /* ------------------------------------------------------------------- loop */
@@ -354,9 +527,21 @@ let fpsFrames = 0;
 
 /* Adaptive render scale: split screen renders the world twice, so on modest
    GPUs we quietly drop resolution instead of dropping frames. */
+const QUALITY_CAPS = { high: 1.5, balanced: 1.0, low: 0.7, auto: 1.5 };
 const RENDER_SCALES = [1.5, 1.15, 0.9, 0.75, 0.6];
 let scaleIndex = 0;
 let slowSeconds = 0;
+let fastSeconds = 0;
+
+function applyQuality() {
+  const cap = QUALITY_CAPS[settings.quality] ?? 1.5;
+  scaleIndex = 0;
+  const dpr = Math.min(window.devicePixelRatio || 1, cap);
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  slowSeconds = 0;
+  fastSeconds = 0;
+}
 
 function ctx() {
   return { fighters: game.fighters, effects, pickups: game.pickups };
@@ -364,10 +549,24 @@ function ctx() {
 
 function simulate(dt) {
   const c = ctx();
+  game.match?.update(dt);
 
   for (let i = 0; i < game.locals.length; i++) {
     const f = game.locals[i];
+    if (!f.alive) {
+      // Dead players spectate the action instead of staring at terrain.
+      updateSpectator(i, dt);
+      f.update(dt, { forward: 0, strafe: 0, lookX: 0, lookY: 0, jump: false, sprint: false, crouch: false, fire: false, aim: false, reload: false, swap: false, slot: 0, med: false }, c);
+      continue;
+    }
+    game.spectate[i] = null;
     const input = i === 0 ? game.input1.poll() : game.input2.poll(dt);
+    // Zoomed snipers get proportionally slower look, or the reticle jumps.
+    if (f.weapon.kind === 'sniper' && f.aimT > 0.5) {
+      const k = 1 - f.aimT * 0.62;
+      input.lookX *= k;
+      input.lookY *= k;
+    }
     f.update(dt, input, c);
   }
 
@@ -403,32 +602,59 @@ function simulate(dt) {
   grassP1.rebuild(game.locals[0].position.x, game.locals[0].position.z);
   if (game.locals[1]) grassP2.rebuild(game.locals[1].position.x, game.locals[1].position.z);
 
-  // win condition
-  if (game.mode === 'duo' && !game.over) {
-    const winner = game.locals.find((f) => f.kills >= game.killLimit);
-    if (winner) {
-      game.over = true;
-      game.paused = true;
-      $('victory').classList.add('show');
-      $('victoryTitle').textContent = `${winner.name} WINS`;
-      $('victorySub').textContent = `${game.locals.map((f) => `${f.name} ${f.kills}`).join('   ·   ')}`;
-      document.body.classList.remove('playing');
-      if (document.pointerLockElement) document.exitPointerLock();
-    }
+  if (game.match && !game.over) {
+    const m = game.match;
+    hud.setClock(m.clock);
+    hud.setClockWarning(m.timeLimit > 0 && m.remaining < 30);
+    if (m.over) endMatch();
   }
 }
 
+/**
+ * Dead players ride behind a living fighter. Dead local players for a moment
+ * see the killer, then the whole island from above.
+ */
+function updateSpectator(idx, dt) {
+  const cam = idx === 0 ? game.cam1 : game.cam2;
+  if (!cam) return;
+  if (!game.spectate[idx]) {
+    const candidates = game.fighters.filter((f) => f.alive && f !== game.locals[idx]);
+    game.spectate[idx] = { target: candidates[0] || null, t: 0, orbit: Math.random() * Math.PI * 2 };
+  }
+  const sp = game.spectate[idx];
+  sp.t += dt;
+  const target = sp.target && sp.target.alive ? sp.target : null;
+  if (target) {
+    const h = Math.sin(sp.t * 0.3) * 0.4;
+    cam.position.set(
+      target.position.x + Math.sin(sp.orbit + sp.t * 0.15) * 6,
+      target.position.y + 3.2 + h,
+      target.position.z + Math.cos(sp.orbit + sp.t * 0.15) * 6
+    );
+    cam.lookAt(target.position.x, target.position.y + 1.4, target.position.z);
+  }
+  // Respawn resets the orbit.
+}
+
 function updateHud(dt) {
-  if (!game.running) return;
+  if (!game.running && !game.over) return;
   for (let i = 0; i < game.locals.length; i++) {
     const cam = i === 0 ? game.cam1 : game.cam2;
     hud.update(dt, i, game.locals[i], game.fighters, game.pickups, cam);
   }
   for (let i = 0; i < game.locals.length; i++) {
-    if (i === 1 && game.input2 && !game.input2.connected) {
+    if (i === 1 && game.input2 && game.input2 instanceof GamepadInput && !game.input2.connected) {
       hud.setSpectating(1, true);
     }
   }
+}
+
+function resetViews() {
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+  renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY_CAPS[settings.quality] ?? 1.5));
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function renderView(camera, x, y, w, h) {
@@ -478,13 +704,87 @@ function render() {
   sun.position.set(cx, cy, cz).addScaledVector(U.uSunDir.value, 320);
   sun.shadow.needsUpdate = true;
 
+  // Split screen: paint the non-scoped pane first, so the scoped pane's
+  // black-out cannot erase it, then render the scoped pane.
+  const half = Math.floor(w / 2);
   if (game.mode === 'duo' && game.cam2) {
-    const half = Math.floor(w / 2);
-    renderView(game.cam1, 0, 0, half, h);
-    renderView(game.cam2, half, 0, w - half, h);
+    if (isScoped(game.locals[0]) && !isScoped(game.locals[1])) {
+      renderView(game.cam2, half, 0, w - half, h);
+      renderPlayerView(game.cam1, game.locals[0], 0, 0, half, h);
+    } else {
+      renderPlayerView(game.cam1, game.locals[0], 0, 0, half, h);
+      renderPlayerView(game.cam2, game.locals[1], half, 0, w - half, h);
+    }
   } else {
-    renderView(game.cam1, 0, 0, w, h);
+    renderPlayerView(game.cam1, game.locals[0], 0, 0, w, h);
   }
+}
+
+function isScoped(fighter) {
+  return !!(fighter && fighter.weapon?.kind === 'sniper' && fighter.aimT > 0.82);
+}
+
+/**
+ * Draw one player's view. While a sniper is fully scoped the image is shown
+ * through a circular lens (stencil-free: scissor + oversized camera fov), so
+ * what you see inside the scope is genuinely magnified. The HTML overlay then
+ * blacks out everything outside that same circle.
+ */
+function renderPlayerView(camera, fighter, x, y, w, h) {
+  const scoped = isScoped(fighter);
+  if (!scoped) {
+    renderView(camera, x, y, w, h);
+    return;
+  }
+
+  // The lens is the same circle the HTML overlay masks: min(64vh, 88% of pane).
+  const lens = Math.min((h * 64) / 100, w * 0.88);
+  const zoom = Math.min(3, w / lens);
+  const zoomedFov = THREE.MathUtils.radToDeg(
+    2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(fighter.adsFov) / 2) / zoom)
+  );
+
+  const dpr = renderer.getPixelRatio();
+  const prevFov = camera.fov;
+  camera.fov = zoomedFov;
+  camera.aspect = w / h;                      // never squash the magnified image
+  camera.updateProjectionMatrix();
+
+  // Render the lens square, centered on the pane centre, with the camera
+  // projection centered inside it (no half-pane offset).
+  sky.position.copy(camera.position);
+  motes.position.copy(camera.position);
+  renderer.setScissorTest(true);
+  renderer.setScissor(
+    Math.round((x + w / 2 - lens / 2) * dpr),
+    Math.round((y + h / 2 - lens / 2) * dpr),
+    Math.round(lens * dpr),
+    Math.round(lens * dpr)
+  );
+  renderer.setViewport(
+    Math.round((x + w / 2 - lens / 2) * dpr),
+    Math.round((y + h / 2 - lens / 2) * dpr),
+    Math.round(lens * dpr),
+    Math.round(lens * dpr)
+  );
+  renderer.clearDepth();
+  renderer.render(scene, camera);
+
+  camera.fov = prevFov;
+  camera.updateProjectionMatrix();
+
+  // Fill the rest of this pane with black; the round mask is drawn by HTML.
+  const px = Math.round(x * dpr);
+  const py = Math.round(y * dpr);
+  const pw = Math.round(w * dpr);
+  const ph = Math.round(h * dpr);
+  renderer.setScissor(px, py, pw, ph);
+  renderer.setViewport(px, py, pw, ph);
+  const gl = renderer.getContext();
+  gl.enable(gl.SCISSOR_TEST);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  renderer.setScissorTest(false);
 }
 
 function tick() {
@@ -493,7 +793,7 @@ function tick() {
   U.uTime.value += dt;
   game.menuT += dt;
 
-  if (game.running && !game.paused) simulate(dt);
+  if (game.running && !game.paused && !game.over) simulate(dt);
   render();
   updateHud(dt);
 
@@ -502,9 +802,9 @@ function tick() {
   if (fpsAccum > 0.5) {
     const fps = Math.round(fpsFrames / fpsAccum);
     const el = $('fps');
-    if (el) el.textContent = `${fps} FPS`;
+    if (el) el.textContent = `${fps} FPS  ·  ${game.running ? (game.mode === 'duo' ? 'SPLIT' : 'SOLO') : 'MENU'}`;
 
-    if (game.running && fps < 46 && scaleIndex < RENDER_SCALES.length - 1) {
+    if (settings.quality === 'auto' && game.running && fps < 46 && scaleIndex < RENDER_SCALES.length - 1) {
       slowSeconds += fpsAccum;
       if (slowSeconds > 2.5) {
         scaleIndex++;
@@ -513,8 +813,18 @@ function tick() {
         slowSeconds = 0;
         console.log(`[quality] render scale → ${RENDER_SCALES[scaleIndex]}`);
       }
-    } else if (fps >= 46) {
+    } else if (settings.quality === 'auto' && game.running && fps >= 56) {
+      // Recover resolution after a dip (e.g. the first few seconds of a match).
+      fastSeconds += fpsAccum;
+      if (fastSeconds > 6 && scaleIndex > 0) {
+        scaleIndex--;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, RENDER_SCALES[scaleIndex]));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        fastSeconds = 0;
+      }
+    } else {
       slowSeconds = 0;
+      fastSeconds = 0;
     }
     fpsAccum = 0;
     fpsFrames = 0;
@@ -536,30 +846,74 @@ function applyEnvironment() {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyT') {
+  if (e.code === 'KeyT' && !e.repeat) {
     applyPreset(envState.presetIndex + 1);
     applyEnvironment();
   }
-  if (e.code === 'KeyM') ambience.toggle();
+  if (e.code === 'KeyM' && !e.repeat) {
+    const muted = ambience.toggle();
+    sfx.setMuted(muted);
+    hud.toast(0, muted ? 'SOUND OFF' : 'SOUND ON');
+    if (game.locals[1] && game.mode === 'duo') hud.toast(1, muted ? 'SOUND OFF' : 'SOUND ON');
+  }
+  if (e.code === 'Escape') {
+    if (game.over) quitToMenu();
+    else if (game.running && !game.paused) {
+      pauseGame();
+      if (document.pointerLockElement) document.exitPointerLock();
+    } else if (game.running && game.paused) {
+      resumeGame();
+    }
+  }
+  if (game.over && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
+    startMatch(game.mode, game.botCount, game.killLimit);
+  }
 });
 
 $('btnSolo').addEventListener('click', (e) => {
   e.stopPropagation();
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
   const bots = parseInt($('botCount').value, 10) || 4;
   startMatch('solo', bots);
 });
 $('btnDuo').addEventListener('click', (e) => {
   e.stopPropagation();
-  startMatch('duo');
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+  const limit = parseInt($('killLimit').value, 10) || 15;
+  startMatch('duo', 0, limit);
 });
 
-$('pause').addEventListener('click', () => resumeGame());
+$('pause').addEventListener('click', (e) => {
+  if (e.target.closest('#pauseGrid')) return;
+  resumeGame();
+});
 $('btnQuit').addEventListener('click', (e) => { e.stopPropagation(); quitToMenu(); });
-$('victory').addEventListener('click', () => {
-  $('victory').classList.remove('show');
-  startMatch(game.mode, game.bots.length || 4);
+$('btnRematch').addEventListener('click', (e) => {
+  e.stopPropagation();
+  startMatch(game.mode, game.botCount, game.killLimit);
 });
 $('btnVictoryMenu').addEventListener('click', (e) => { e.stopPropagation(); quitToMenu(); });
+
+// pause settings
+$('optVolume').addEventListener('input', (e) => {
+  settings.volume = parseInt(e.target.value, 10) / 100;
+  ambience.setVolume(settings.volume);
+  sfx.volume = settings.volume;
+  sfx.setMuted(settings.volume <= 0.001);
+  saveSettings();
+});
+$('optQuality').addEventListener('change', (e) => {
+  settings.quality = e.target.value;
+  applyQuality();
+  saveSettings();
+});
+$('optRumble').addEventListener('change', (e) => {
+  settings.rumble = e.target.value === 'on';
+  saveSettings();
+});
+$('optVolume').value = String(Math.round(settings.volume * 100));
+$('optQuality').value = settings.quality;
+$('optRumble').value = settings.rumble ? 'on' : 'off';
 
 canvas.addEventListener('click', () => {
   if (game.running && !game.paused && game.input1 && !game.input1.locked) {
@@ -573,7 +927,9 @@ function updatePadStatus() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let count = 0;
   for (const p of pads) if (p && p.connected) count++;
-  el.textContent = count > 0 ? `CONTROLLER DETECTED (${count})` : 'NO CONTROLLER — PLAYER 2 NEEDS ONE';
+  el.textContent = count > 0
+    ? `CONTROLLER DETECTED (${count}) — PLAYER 2 READY`
+    : 'NO CONTROLLER — PLAYER 2 CAN USE IJKL + ARROWS';
   el.classList.toggle('ok', count > 0);
 }
 setInterval(updatePadStatus, 800);
@@ -585,8 +941,25 @@ window.addEventListener('resize', () => {
   menuCamera.updateProjectionMatrix();
 });
 
+/* Dev handle: lets the automated harness drive match outcomes. Never active
+   in a normal launch (only with ?debug in the URL). */
+try {
+  if (new URLSearchParams(window.location.search).has('debug')) {
+    window.__aetheris = {
+      game,
+      startMatch,
+      endMatch,
+      pauseGame,
+      resumeGame,
+      quitToMenu,
+      get match() { return game.match; },
+    };
+  }
+} catch (_) { /* no location (headless) */ }
+
 buildWorld().then(() => {
   updatePadStatus();
+  applyQuality();
   $('loader').classList.add('done');
   $('menu').classList.add('show');
   clock.start();

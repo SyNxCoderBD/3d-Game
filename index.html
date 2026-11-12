@@ -127,6 +127,111 @@
     text-shadow: 0 0 8px rgba(0,0,0,0.9);
   }
   .hitmarker.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+  /* ----------------------------------------------------------- sniper scope */
+  .scope {
+    position: absolute; inset: 0; opacity: 0; transition: opacity 0.18s ease;
+    pointer-events: none; overflow: hidden;
+  }
+  .scope.show { opacity: 1; }
+  .scope-ring {
+    position: absolute; left: 50%; top: 50%;
+    width: min(64vh, 88%); aspect-ratio: 1 / 1;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 2px solid rgba(8, 12, 10, 0.95);
+    /* Everything outside the lens is blacked out, in any pane shape. */
+    box-shadow: inset 0 0 70px rgba(0,0,0,0.8), 0 0 0 200vmax #000;
+  }
+  .scope-cross { position: absolute; background: rgba(12, 18, 14, 0.9); }
+  .scope-cross.v { left: 50%; top: 50%; width: 1px; height: 200%; transform: translate(-50%, -50%); }
+  .scope-cross.h { left: 50%; top: 50%; width: 200%; height: 1px; transform: translate(-50%, -50%); }
+  .scope-mildots { position: absolute; left: 50%; top: 62%; transform: translate(-50%, 0); display: flex; flex-direction: column; gap: 7vh; }
+  .scope-mildots i { width: 3px; height: 3px; background: rgba(12,18,14,0.8); border-radius: 50%; }
+  .scope-mildots i:nth-child(odd) { transform: translateX(-16px); }
+  .scope-mildots i:nth-child(even) { transform: translateX(13px); }
+  .scope-label {
+    position: absolute; left: 50%; bottom: 19vh; transform: translateX(-50%);
+    font-size: 9px; letter-spacing: 0.4em; color: rgba(190, 240, 220, 0.5); text-transform: uppercase;
+  }
+
+  /* --------------------------------------------------------- reload ring */
+  .reload-ring {
+    position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
+    transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+  .reload-ring.show { opacity: 1; }
+  .reload-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .reload-ring circle {
+    fill: none; stroke-width: 2.5; stroke-linecap: round;
+  }
+  .reload-ring .track { stroke: rgba(255, 255, 255, 0.14); }
+  .reload-ring .fill {
+    stroke: #7ef7e4; stroke-dasharray: 113; stroke-dashoffset: 113;
+    filter: drop-shadow(0 0 4px rgba(126, 247, 228, 0.7));
+  }
+
+  /* ------------------------------------------------------ damage direction */
+  .dmg-dirs { position: absolute; inset: 0; pointer-events: none; }
+  .dmg-dir {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+    transform-origin: 0 0; transition: opacity 0.25s linear;
+  }
+  .dmg-dir span {
+    position: absolute; left: -14px; top: -132px; width: 28px; height: 18px;
+    background: linear-gradient(180deg, rgba(255, 70, 60, 0.95), rgba(255, 70, 60, 0));
+    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+    filter: drop-shadow(0 0 6px rgba(255, 40, 30, 0.7));
+  }
+
+  /* -------------------------------------------------------- clock + streak */
+  .topline .clock { font-size: 12px; letter-spacing: 0.18em; color: #cfe3da; font-variant-numeric: tabular-nums; }
+  .topline .clock.urgent { color: #ff6b5b; animation: pulseClock 1s ease-in-out infinite; }
+  @keyframes pulseClock { 50% { opacity: 0.45; } }
+
+  .streak {
+    position: absolute; left: 50%; top: 22%; transform: translate(-50%, -8px) scale(0.94);
+    font-family: Georgia, "Times New Roman", serif; font-size: clamp(15px, 2.2vw, 26px);
+    letter-spacing: 0.34em; text-indent: 0.34em; color: #ffe7a8;
+    text-shadow: 0 0 24px rgba(255, 190, 90, 0.55), 0 2px 10px rgba(0,0,0,0.9);
+    opacity: 0; transition: opacity 0.22s ease, transform 0.22s ease; white-space: nowrap;
+  }
+  .streak.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+
+  /* ---------------------------------------------------------- scoreboard */
+  .scoreboard {
+    margin-top: 20px; border-collapse: collapse; min-width: min(560px, 86vw);
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    background: rgba(8, 14, 13, 0.55); border: 1px solid rgba(126, 247, 228, 0.18);
+  }
+  .scoreboard th {
+    padding: 9px 16px; font-weight: 600; font-size: 9px; letter-spacing: 0.28em;
+    color: #7ef7e4; border-bottom: 1px solid rgba(126, 247, 228, 0.22); text-align: right;
+  }
+  .scoreboard th.rank, .scoreboard td.rank { text-align: center; color: #8fa79c; width: 34px; }
+  .scoreboard th.who, .scoreboard td.who { text-align: left; }
+  .scoreboard td { padding: 9px 16px; color: #d9e8e0; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: right; font-variant-numeric: tabular-nums; }
+  .scoreboard tr:last-child td { border-bottom: none; }
+  .scoreboard tr.me td { color: #bff8ec; background: rgba(126, 247, 228, 0.07); }
+  .scoreboard tr.me td.who { font-weight: 600; }
+  .scoreboard tbody tr:nth-child(1) td.rank { color: #ffd166; }
+
+  /* ------------------------------------------------------- pause options */
+  #pause { gap: 14px; }
+  .pauseGrid { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; align-items: stretch; min-width: 280px; }
+  .pauseRow { display: flex; align-items: center; justify-content: space-between; gap: 22px; font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: #9fb5ab; }
+  .pauseRow input[type=range] { flex: 1; max-width: 170px; accent-color: #7ef7e4; background: transparent; }
+  .pauseRow select {
+    background: rgba(6, 12, 10, 0.85); color: #d6f2ea; border: 1px solid rgba(126,247,228,0.3);
+    border-radius: 3px; padding: 6px 10px; font-size: 10.5px; letter-spacing: 0.14em; cursor: pointer;
+  }
+  .pauseHint { margin-top: 10px; font-size: 9.5px; letter-spacing: 0.2em; color: #7d9388; text-transform: uppercase; }
+
+  /* -------------------------------------------------- swap flash on gun name */
+  .weaponbox .wname.swap { animation: swapFlash 0.45s ease; }
+  @keyframes swapFlash { 0% { color: #7ef7e4; letter-spacing: 0.42em; } 100% { color: #a8c4b8; letter-spacing: 0.28em; } }
+
   .hitmarker.head { color: #ffd166; }
 
   .topline {
@@ -222,6 +327,10 @@
     transition: background 0.25s ease, border-color 0.25s ease;
   }
   .ghostBtn:hover { background: rgba(126,247,228,0.16); border-color: rgba(126,247,228,0.8); }
+  .ghostBtn .keyhint {
+    margin-left: 10px; padding: 2px 6px; font-size: 8.5px; letter-spacing: 0.12em;
+    border: 1px solid rgba(126,247,228,0.3); border-radius: 2px; color: #9fe8da; opacity: 0.8;
+  }
 
   #fps {
     position: fixed; left: 10px; bottom: 6px; z-index: 25;
@@ -266,8 +375,16 @@
         </div>
         <div class="modeCard highlight" id="btnDuo">
           <h2>2P · SPLIT SCREEN DUEL</h2>
-          <p>Two players, one island, one screen. Player 1 on keyboard and mouse, Player 2 on a controller. First to 15 eliminations takes the match.</p>
-          <span class="kbd">P1 KEYBOARD + MOUSE &nbsp;·&nbsp; P2 GAMEPAD</span>
+          <p>Two players, one island, one screen. Player 1 on keyboard and mouse, Player 2 on a controller — or on the arrow-cluster keys if no pad is plugged in.</p>
+          <span class="kbd">P1 KEYBOARD + MOUSE &nbsp;·&nbsp; P2 GAMEPAD / KEYS</span>
+          <div>
+            <select id="killLimit">
+              <option value="10">FIRST TO 10</option>
+              <option value="15" selected>FIRST TO 15</option>
+              <option value="20">FIRST TO 20</option>
+              <option value="30">FIRST TO 30</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -277,14 +394,20 @@
           <div><span>WASD</span> <i>move</i> &nbsp; <span>MOUSE</span> <i>look</i></div>
           <div><span>LMB</span> <i>fire</i> &nbsp; <span>RMB</span> <i>aim</i> &nbsp; <span>R</span> <i>reload</i></div>
           <div><span>SHIFT</span> <i>sprint</i> &nbsp; <span>SPACE</span> <i>jump</i> &nbsp; <span>CTRL</span> <i>crouch</i></div>
-          <div><span>Q</span> <i>med kit</i> &nbsp; <span>TAB</span> <i>swap weapon</i></div>
+          <div><span>Q</span> <i>med kit</i> &nbsp; <span>F</span> <i>swap</i> &nbsp; <span>1 2 3</span> <i>weapon slots</i></div>
+          <div><span>T</span> <i>time of day</i> &nbsp; <span>M</span> <i>mute</i> &nbsp; <span>ESC</span> <i>pause</i></div>
         </div>
         <div>
           <h3>PLAYER 2 — CONTROLLER</h3>
           <div><span>STICKS</span> <i>move / look</i></div>
           <div><span>RT</span> <i>fire</i> &nbsp; <span>LT</span> <i>aim</i> &nbsp; <span>X</span> <i>reload</i></div>
           <div><span>A</span> <i>jump</i> &nbsp; <span>LB</span> <i>sprint</i> &nbsp; <span>R3</span> <i>crouch</i></div>
-          <div><span>Y</span> <i>med kit</i> &nbsp; <span>B / RB</span> <i>swap weapon</i></div>
+          <div><span>Y</span> <i>med kit</i> &nbsp; <span>B / RB</span> <i>swap</i> &nbsp; <span>D-PAD</span> <i>slots</i></div>
+          <div style="margin-top:10px"><h3>PLAYER 2 — NO PAD? KEYS</h3></div>
+          <div><span>IJKL</span> <i>move</i> &nbsp; <span>ARROWS</span> <i>look</i></div>
+          <div><span>ENTER</span> <i>fire</i> &nbsp; <span>RSHIFT</span> <i>aim</i> &nbsp; <span>.</span> <i>reload</i></div>
+          <div><span>'</span> <i>jump</i> &nbsp; <span>\</span> <i>sprint</i> &nbsp; <span>RCTRL</span> <i>crouch</i></div>
+          <div><span>,</span> <i>med kit</i> &nbsp; <span>/</span> <i>swap weapon</i></div>
         </div>
       </div>
 
@@ -298,13 +421,33 @@
   <div id="pause">
     <div class="overlayTitle">PAUSED</div>
     <div class="overlaySub">Click anywhere to resume</div>
-    <button class="ghostBtn" id="btnQuit">Quit to menu</button>
+    <div class="pauseGrid" id="pauseGrid">
+      <div class="pauseRow"><span>Volume</span><input type="range" id="optVolume" min="0" max="100" step="5" value="90" /></div>
+      <div class="pauseRow"><span>Render quality</span>
+        <select id="optQuality">
+          <option value="auto" selected>AUTO</option>
+          <option value="high">HIGH</option>
+          <option value="balanced">BALANCED</option>
+          <option value="low">LOW</option>
+        </select>
+      </div>
+      <div class="pauseRow"><span>Controller rumble</span>
+        <select id="optRumble">
+          <option value="on" selected>ON</option>
+          <option value="off">OFF</option>
+        </select>
+      </div>
+      <button class="ghostBtn" id="btnQuit">Quit to menu</button>
+      <div class="pauseHint">ESC also resumes</div>
+    </div>
   </div>
 
   <div id="victory">
-    <div class="overlayTitle" id="victoryTitle">PLAYER 1 WINS</div>
-    <div class="overlaySub" id="victorySub"></div>
-    <button class="ghostBtn" id="btnVictoryMenu">Back to menu</button>
+    <div id="victoryBody"></div>
+    <div class="pauseGrid">
+      <button class="ghostBtn" id="btnRematch">Rematch <span class="keyhint">ENTER</span></button>
+      <button class="ghostBtn" id="btnVictoryMenu">Back to menu <span class="keyhint">ESC</span></button>
+    </div>
   </div>
 
   <div id="fatal">

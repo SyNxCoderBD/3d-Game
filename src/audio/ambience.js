@@ -91,7 +91,8 @@ export class Ambience {
         osc.start();
       });
 
-      master.gain.setTargetAtTime(0.5, ctx.currentTime, 2.0);
+      this.volume ??= 0.5;
+      master.gain.setTargetAtTime(this.volume, ctx.currentTime, 2.0);
     } catch (err) {
       console.warn('Audio unavailable:', err);
     }
@@ -99,8 +100,19 @@ export class Ambience {
 
   setMuted(muted) {
     this.muted = muted;
+    this._applyVolume(0.15);
+  }
+
+  setVolume(volume) {
+    this.volume = Math.max(0, Math.min(1, volume));
+    this._applyVolume(0.15);
+  }
+
+  _applyVolume(tau) {
+    this.volume ??= 0.5;
     if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(muted ? 0.0 : 0.5, this.ctx.currentTime, 0.15);
+      const target = this.muted ? 0 : this.volume;
+      this.master.gain.setTargetAtTime(target, this.ctx.currentTime, tau);
     }
   }
 

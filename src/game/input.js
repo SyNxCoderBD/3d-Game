@@ -1,14 +1,14 @@
 /**
- * Input sources. Both produce the same shape so a Fighter cannot tell whether
+ * Input sources. All produce the same shape so a Fighter cannot tell whether
  * a human or a bot is driving it:
  *   { forward, strafe, lookX, lookY, jump, sprint, crouch, fire, aim,
- *     reload, swap, med }
+ *     reload, swap, slot, med }
  */
 
 const EMPTY_INPUT = () => ({
   forward: 0, strafe: 0, lookX: 0, lookY: 0,
   jump: false, sprint: false, crouch: false,
-  fire: false, aim: false, reload: false, swap: false, med: false,
+  fire: false, aim: false, reload: false, swap: false, slot: 0, med: false,
 });
 
 export class KeyboardMouseInput {
@@ -24,7 +24,7 @@ export class KeyboardMouseInput {
     this.locked = false;
     this.lookMode = 'lock';
     this.dragging = false;
-    this.pulses = { reload: 0, swap: 0, med: 0 };
+    this.pulses = { reload: 0, swap: 0, slot: 0, med: 0 };
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' || e.code === 'Tab') e.preventDefault();
@@ -33,8 +33,10 @@ export class KeyboardMouseInput {
       if (!this.enabled) return;
       if (e.code === 'KeyR') this.pulses.reload = 1;
       if (e.code === 'KeyQ') this.pulses.med = 1;
-      if (e.code === 'Tab' || e.code === 'KeyF') this.pulses.swap = 1;
-      if (e.code === 'Digit1' || e.code === 'Digit2') this.pulses.swap = 1;
+      if (e.code === 'KeyF') this.pulses.swap = 1;
+      if (e.code === 'Digit1') this.pulses.slot = 1;
+      if (e.code === 'Digit2') this.pulses.slot = 2;
+      if (e.code === 'Digit3') this.pulses.slot = 3;
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => {
@@ -108,12 +110,64 @@ export class KeyboardMouseInput {
     out.lookY = this.lookY;
     out.reload = this.pulses.reload > 0;
     out.swap = this.pulses.swap > 0;
+    out.slot = this.pulses.slot;
+    out.med = this.pulses.med > 0;
+    this.pulses.reload = 0;
+    this.pulses.swap = 0;
+    this.pulses.slot = 0;
+    this.pulses.med = 0;
+    this.lookX = 0;
+    this.lookY = 0;
+    return out;
+  }
+}
+
+/**
+ * Keyboard fallback for Player 2, used only when no controller is connected.
+ * Arrows aim, IJKL move; the right-hand cluster fires and manages the weapon.
+ */
+export class KeyboardSecondInput {
+  constructor({ lookSpeed = 2.6 } = {}) {
+    this.lookSpeed = lookSpeed;
+    this.enabled = false;
+    this.keys = new Set();
+    this.pulses = { reload: 0, swap: 0, med: 0 };
+
+    window.addEventListener('keydown', (e) => {
+      const code = e.code;
+      if (code.startsWith('Arrow') || code === 'Enter') e.preventDefault();
+      if (this.keys.has(code)) return;
+      this.keys.add(code);
+      if (!this.enabled) return;
+      if (code === 'Period') this.pulses.reload = 1;
+      if (code === 'Comma') this.pulses.med = 1;
+      if (code === 'Slash') this.pulses.swap = 1;
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  poll(dt) {
+    const out = EMPTY_INPUT();
+    if (!this.enabled) return out;
+    const k = this.keys;
+
+    out.forward = (k.has('KeyI') ? 1 : 0) - (k.has('KeyK') ? 1 : 0);
+    out.strafe = (k.has('KeyL') ? 1 : 0) - (k.has('KeyJ') ? 1 : 0);
+    out.lookX = ((k.has('ArrowLeft') ? 1 : 0) - (k.has('ArrowRight') ? 1 : 0)) * this.lookSpeed * dt;
+    out.lookY = ((k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0)) * this.lookSpeed * dt;
+
+    out.jump = k.has('Quote');
+    out.sprint = k.has('Backslash');
+    out.crouch = k.has('ControlRight');
+    out.fire = k.has('Enter');
+    out.aim = k.has('ShiftRight');
+    out.reload = this.pulses.reload > 0;
+    out.swap = this.pulses.swap > 0;
     out.med = this.pulses.med > 0;
     this.pulses.reload = 0;
     this.pulses.swap = 0;
     this.pulses.med = 0;
-    this.lookX = 0;
-    this.lookY = 0;
     return out;
   }
 }
@@ -125,7 +179,7 @@ export class GamepadInput {
     this.deadzone = deadzone;
     this.enabled = false;
     this.prevButtons = [];
-    this.sprintLatch = false;
+    this.rumbleUntil = 0;
   }
 
   get pad() {
@@ -143,6 +197,27 @@ export class GamepadInput {
 
   static dz(v, d) {
     return Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d);
+  }
+
+  /**
+   * Fire the actuator's dual-rumble effect. Silently no-ops on browsers or
+   * pad drivers that don't support it.
+   */
+  rumble(strength = 0.6, duration = 120, weak = 0.4) {
+    const pad = this.pad;
+    if (!pad || !this.enabled) return;
+    const actuator = pad.vibrationActuator;
+    if (!actuator || typeof actuator.playEffect !== 'function') return;
+    try {
+      actuator.playEffect('dual-rumble', {
+        startDelay: 0,
+        duration,
+        weakMagnitude: Math.min(1, weak),
+        strongMagnitude: Math.min(1, strength),
+      });
+    } catch (_) {
+      /* not supported on this pad */
+    }
   }
 
   poll(dt) {
@@ -174,6 +249,9 @@ export class GamepadInput {
     out.reload = edge(2);
     out.swap = edge(1) || edge(5);
     out.med = edge(3);
+    // D-pad selects a weapon slot directly.
+    if (edge(14)) out.slot = 1;
+    if (edge(15)) out.slot = 2;
 
     this.prevButtons = pad.buttons.map((b) => b.pressed);
     return out;

@@ -78,6 +78,7 @@ export class Fighter {
     this.slots = [
       { id: 'rifle', ammo: WEAPONS.rifle.magSize, reserve: WEAPONS.rifle.startReserve },
       { id: 'pistol', ammo: WEAPONS.pistol.magSize, reserve: WEAPONS.pistol.startReserve },
+      { id: 'smg', ammo: WEAPONS.smg.magSize, reserve: WEAPONS.smg.startReserve },
     ];
     this.slot = 0;
     this.cooldown = 0;
@@ -128,7 +129,10 @@ export class Fighter {
   get weapon() { return WEAPONS[this.slots[this.slot].id]; }
   get slotData() { return this.slots[this.slot]; }
 
-  refreshWeaponModels() {
+  refreshWeaponModels(force = false) {
+    const id = this.weapon.id;
+    if (!force && this._gunId === id && this.bodyGun) return;
+    this._gunId = id;
     if (this.bodyGun) {
       this.rig.gunMount.remove(this.bodyGun);
       this.bodyGun = null;
@@ -163,14 +167,33 @@ export class Fighter {
       ammo: ammo ?? def.magSize,
       reserve: reserve ?? def.startReserve,
     };
-    // Replace the currently held weapon, or fill the empty slot.
-    const target = this.slot === 0 ? 1 : 0;
-    this.slots[target] = slot;
-    this.slot = target;
+    // Fill the first slot that isn't the one in your hands.
+    let target = -1;
+    for (let i = 0; i < this.slots.length; i++) {
+      if (i !== this.slot) { target = i; break; }
+    }
+    if (target < 0) {
+      this.slots[this.slot] = slot;
+    } else {
+      this.slots[target] = slot;
+      this.slot = target;
+    }
     this.reloading = 0;
     this.swapTimer = 0.3;
     this.refreshWeaponModels();
     return true;
+  }
+
+  selectSlot(index) {
+    if (index === this.slot) return;
+    if (index < 0 || index >= this.slots.length) return;
+    if (!this.slots[index] || this.reloading > 0.55) return;
+    if (this.swapTimer > 0) return;
+    this.slot = index;
+    this.swapTimer = 0.35;
+    this.reloading = 0;
+    this.refreshWeaponModels();
+    this.onSwap?.();
   }
 
   addAmmo(amount) {
@@ -180,11 +203,17 @@ export class Fighter {
   }
 
   swapWeapon() {
-    if (this.swapTimer > 0 || this.reloading > 0) return;
-    this.slot = this.slot === 0 ? 1 : 0;
+    if (this.swapTimer > 0 || this.reloading > 0.55) return;
+    const n = this.slots.length;
+    for (let i = 1; i <= n; i++) {
+      const next = (this.slot + i) % n;
+      if (this.slots[next]) { this.slot = next; break; }
+      // empty slots still need to be skipped, not held
+    }
     this.swapTimer = 0.35;
     this.reloading = 0;
     this.refreshWeaponModels();
+    this.onSwap?.();
   }
 
   startReload() {
@@ -193,6 +222,7 @@ export class Fighter {
     if (this.reloading > 0 || this.swapTimer > 0) return;
     if (data.ammo >= def.magSize || data.reserve <= 0) return;
     this.reloading = def.reloadTime;
+    this.onReloadStart?.(def);
   }
 
   useMedkit() {
@@ -200,6 +230,7 @@ export class Fighter {
     this.medkits--;
     this.health = Math.min(100, this.health + 55);
     this.medCooldown = 1.4;
+    this.onHeal?.();
     return true;
   }
 
@@ -220,9 +251,14 @@ export class Fighter {
     this.bodyAnchor.visible = true;
     this.reloading = 0;
     this.cooldown = 0;
-    this.slots[0].ammo = Math.min(this.slots[0].ammo || WEAPONS[this.slots[0].id].magSize, WEAPONS[this.slots[0].id].magSize);
-    if (this.slots[0].ammo === 0) this.slots[0].ammo = WEAPONS[this.slots[0].id].magSize;
-    this.slots[1].ammo = WEAPONS[this.slots[1].id].magSize;
+    for (const s of this.slots) {
+      if (!s) continue;
+      const def = WEAPONS[s.id];
+      s.ammo = s.ammo || def.magSize;
+      s.reserve = Math.max(s.reserve, Math.round(def.magSize * 0.6));
+    }
+    this.slot = 0;
+    this.refreshWeaponModels();
     this.medkits = Math.max(this.medkits, 1);
     this.syncCamera(0);
   }
@@ -258,6 +294,17 @@ export class Fighter {
     this.health -= dmg;
     this.hitFlash = 1;
     this.lastHitBy = from;
+    if (from) {
+      // Bearing of the incoming fire relative to where this fighter is
+      // looking: 0 = dead ahead, +PI/2 = to the right.
+      const dx = from.position.x - this.position.x;
+      const dz = from.position.z - this.position.z;
+      const sin = Math.sin(this.yaw);
+      const cos = Math.cos(this.yaw);
+      const fwd = -dx * sin - dz * cos;
+      const right = dx * cos - dz * sin;
+      this.lastHitAngle = Math.atan2(right, fwd);
+    }
     this.onDamage?.(dmg, from, headshot);
 
     if (this.health <= 0) {
@@ -296,6 +343,16 @@ export class Fighter {
       animateCharacter(this.rig, { dead: true, speed: 0, grounded: true, aiming: false }, dt);
       if (this.respawnTimer <= 0 && ctx) this.respawn(ctx);
       return;
+    }
+
+    // Aim assist: pad players get a gentle magnetic pull while aiming down
+    // sights. It never snaps — it only slows the reticle near a target.
+    if (this.aimAssist && ctx && (input.lookX || input.lookY)) {
+      const assist = this.computeAimAssist(ctx.fighters);
+      if (assist) {
+        input.lookX += assist.x;
+        input.lookY += assist.y;
+      }
     }
 
     // look
@@ -375,6 +432,7 @@ export class Fighter {
         data.ammo += take;
         data.reserve -= take;
         this.reloading = 0;
+        this.onReloadEnd?.();
       }
     }
 
@@ -388,6 +446,7 @@ export class Fighter {
 
     if (input.reload) this.startReload();
     if (input.swap) this.swapWeapon();
+    if (input.slot) this.selectSlot(input.slot - 1);
     if (input.med) this.useMedkit();
 
     // recoil recovery
@@ -459,10 +518,45 @@ export class Fighter {
     const kick = this.cooldown > 0 ? this.cooldown * 6 : 0;
     p.position.z += kick * 0.02;
 
+    if (this.viewGun) {
+      const scoped = this.weapon.kind === 'sniper' && this.aimT > 0.9;
+      this.viewGun.visible = !scoped;
+    }
+
     if (this.viewFlash) {
       this.viewFlash.visible = this.flashTimer > 0;
       if (this.flashTimer > 0) this.viewFlash.scale.setScalar(0.8 + Math.random() * 0.5);
     }
+  }
+
+  computeAimAssist(fighters) {
+    const fovX = 0.30;
+    const fovY = 0.22;
+    let best = null;
+    let bestScore = Infinity;
+    for (const other of fighters) {
+      if (other === this || !other.alive) continue;
+      const dx = other.position.x - this.position.x;
+      const dz = other.position.z - this.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 45 || d < 1.5) continue;
+      const desiredYaw = Math.atan2(-dx, -dz);
+      let dy = desiredYaw - this.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      if (Math.abs(dy) > fovX) continue;
+      const targetY = other.position.y + 1.2;
+      const desiredPitch = Math.atan2(targetY - (this.position.y + EYE_HEIGHT), d);
+      const dp = desiredPitch - this.pitch;
+      if (Math.abs(dp) > fovY) continue;
+      const score = Math.abs(dy) * 1.4 + Math.abs(dp) + d * 0.004;
+      if (score < bestScore) { bestScore = score; best = { dy, dp, d }; }
+    }
+    if (!best) return null;
+    const strength = this.aiming ? 0.9 : 0.42;
+    const falloff = Math.max(0.25, 1 - best.d / 45);
+    // Compensate for the fixed look speed the pad applies per frame.
+    const k = strength * falloff * 0.05;
+    return { x: -best.dy * k, y: -best.dp * k };
   }
 
   getEyePosition(out = new THREE.Vector3()) {
@@ -501,6 +595,7 @@ export class Fighter {
     if (this.cooldown > 0 || this.reloading > 0 || this.swapTimer > 0) return;
 
     if (data.ammo <= 0) {
+      if (this.isLocal) this.onEmpty?.();
       this.startReload();
       return;
     }
@@ -543,8 +638,6 @@ export class Fighter {
     this.recoilVel += def.recoil * 9;
     this.recoilPitch += def.recoil * 0.35;
 
-    if (this.isLocal) {
-      this.onShot?.(def);
-    }
+    this.onShot?.(def, muzzlePos);
   }
 }
