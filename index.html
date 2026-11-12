@@ -618,6 +618,51 @@
     </div>
   </div>
 
+  <!--
+    Boot watchdog. main.js installs its own error handlers, but those cannot
+    run if main.js itself fails to load or parse — the page would sit on the
+    static "Awakening" text with no explanation. This inline script is the only
+    code guaranteed to run, so it catches module-level failures and shows them.
+  -->
+  <script>
+    (function () {
+      var shown = false;
+      function report(msg) {
+        if (shown) return;
+        shown = true;
+        var el = document.getElementById('fatal');
+        var status = document.getElementById('loadStatus');
+        if (status) status.textContent = 'Could not start';
+        if (!el) return;
+        var box = el.querySelector('.msg');
+        if (box) box.textContent = msg;
+        el.classList.add('show');
+      }
+      window.addEventListener('error', function (e) {
+        // Resource (script/link) failures surface here with no message.
+        var t = e.target;
+        if (t && t.tagName === 'SCRIPT') {
+          report('A game script failed to load: ' + (t.src || 'unknown') +
+                 '\n\nIf this is the dev server, reload the page. If it persists, the build is incomplete.');
+          return;
+        }
+        report(e.message || String(e.error || 'Unknown error'));
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e.reason;
+        report(r && r.message ? r.message : String(r));
+      });
+      // If the module never even starts, say so instead of pretending to load.
+      setTimeout(function () {
+        if (window.__aetherisBooted) return;
+        var status = document.getElementById('loadStatus');
+        if (!status || status.textContent !== 'Awakening') return;
+        report('The game did not start.\n\n' +
+               'Open the browser console (F12) for the exact error, then reload.\n' +
+               'If you are running from a file, make sure you launched Aetheris.exe.');
+      }, 12000);
+    })();
+  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

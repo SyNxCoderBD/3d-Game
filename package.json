@@ -15,7 +15,8 @@
     "verify:e2e": "vite build && node tools/e2e-run.mjs",
     "verify:net": "node tools/verify-net.mjs",
     "verify:online": "node tools/verify-online.mjs",
-    "verify:all": "npm run verify && npm run verify:game && npm run verify:shaders && npm run verify:net && npm run verify:online && npm run verify:e2e"
+    "verify:all": "npm run verify && npm run verify:game && npm run verify:shaders && npm run verify:net && npm run verify:online && npm run verify:e2e && npm run verify:devboot",
+    "verify:devboot": "node tools/verify-devboot.mjs"
   },
   "dependencies": {
     "@supabase/realtime-js": "^2.119.0",

@@ -1528,6 +1528,8 @@ try {
   }
 } catch (_) { /* no location (headless) */ }
 
+window.__aetherisBooted = true;
+
 buildWorld().then(() => {
   updatePadStatus();
   applyQuality();
