@@ -84,12 +84,10 @@ export function mountMenuChrome({
   fetchReleases,
   onCheck,
   window: win = globalThis.window,
-  doc = globalThis.document,
 } = {}) {
   const label = versionLabel(version);
   const badge = $('menuVersion');
   if (badge) badge.textContent = label;
-  doc?.title; // no-op; keeps the function pure if document is absent in tests
 
   const panel = $('changelog');
   const body = $('changelogBody');

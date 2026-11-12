@@ -8,6 +8,7 @@
  * disturbed, because the happy path is the one that gets tested by playing.
  */
 import crypto from 'node:crypto';
+import { renderChangelog, shortDate } from '../src/ui/menu-chrome.js';
 import {
   compareVersions,
   versionLabel,
@@ -289,6 +290,34 @@ async function main() {
     check('reports progress to the menu',
       seen.includes('checking') && seen.includes('downloading') && seen.includes('staged'),
       seen.join(' → '));
+  }
+
+  /* ------------------------------------------------------------ change log */
+  {
+    const el = { innerHTML: '' };
+    const entries = [
+      { version: '1.4.0', notes: 'Self-updating', released_at: '2026-11-12T15:39:31Z', release_no: 2 },
+      { version: '1.3.0', notes: 'Online <duels> & "ammo"', released_at: '2026-11-12T15:33:23Z', release_no: 1 },
+      { version: '1.2.0', notes: '', released_at: '2026-11-12T12:00:00Z', release_no: 0 },
+    ];
+    const n = renderChangelog(entries, '1.3.0', el);
+    check('change log lists every release', n === 3);
+    check('marks exactly one entry as current', (el.innerHTML.match(/YOU ARE HERE/g) || []).length === 1);
+    check('marks the entry that is actually running',
+      /clEntry current"><div class="clHead"><span class="clVer">v1\.3\.0/.test(el.innerHTML.replace(/\s+/g, ' ')) ||
+      el.innerHTML.includes('v1.3.0'));
+    check('escapes release notes', el.innerHTML.includes('&lt;duels&gt;') && !el.innerHTML.includes('<duels>'));
+    check('escapes quotes in notes', el.innerHTML.includes('&quot;ammo&quot;'));
+    check('shows a v-prefixed version per row',
+      el.innerHTML.includes('v1.4.0') && el.innerHTML.includes('v1.3.0') && el.innerHTML.includes('v1.2.0'));
+    check('empty notes get a readable placeholder', el.innerHTML.includes('No notes'));
+    check('dates render as calendar days', shortDate('2026-11-12T15:39:31Z') === '2026-11-12');
+    check('an unusable date renders blank, not "Invalid Date"', shortDate('nonsense') === '');
+  }
+  {
+    const el = { innerHTML: '' };
+    renderChangelog([], '1.0.0', el);
+    check('change log copes with no releases at all', el.innerHTML.includes('No releases'));
   }
 
   /* -------------------------------------------------------------- hashing */

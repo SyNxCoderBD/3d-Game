@@ -27,6 +27,11 @@ Nothing is installed and no admin rights are needed. On launch the exe unpacks
 its embedded world into `%TEMP%\AetherisIsle` and opens it in a borderless
 app-mode window using the Edge / Chrome engine that already ships with Windows.
 
+The build you are running is printed in the main menu, next to a **Change log**
+button that lists every published release. You never have to download a new exe
+to get a new version: on launch the game asks for the newest published build and,
+if there is one, installs it for the next start. See `docs/RELEASING.md`.
+
 > **SmartScreen:** the binary is unsigned, so Windows may show
 > *"Windows protected your PC"* the first time. Click **More info → Run anyway**.
 > Some antivirus tools also flag unsigned self-extracting launchers; the source
@@ -175,6 +180,34 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.4.0 — the game updates itself
+- **New versions install themselves.** The exe is a launcher now, not a
+  snapshot: it keeps one copy of the game so it can always start, and on every
+  launch it checks whether a newer build has been published. If one has, it
+  downloads it, verifies its SHA-256 and swaps it in for the next start. No
+  re-downloading the exe, ever.
+- **The version is in the menu**, next to a **Change log** panel listing every
+  released version with its notes and the one you are running marked
+  *you are here*.
+- **Updates are verified, not trusted.** A build that does not hash to the
+  published value is refused and the current one keeps working; so is a
+  truncated download. The running game is never modified in place — a new build
+  is written alongside it and only becomes the game on the next launch.
+- **The changelog is live**: publishing a release is what makes it appear, for
+  every player, without a new download.
+- Publishing needs the database credential; the anon key inside the game can
+  read releases but not write them, so nobody can ship a modified build to
+  other players.
+
+### 1.3.0 — ammo everywhere, online duels
+- **Ammo respawns often.** Resupply crates are spread across the island and
+  come back quickly, so running dry is a looting problem, not a match-ender.
+- **Online play over a room code**, with no split screen — each player gets a
+  full-screen view. Host a room, read out the five-character code, and your
+  friend joins from anywhere.
+- **Live ping** in the HUD and in the lobby, so you can see the connection
+  quality before the match starts.
+
 ### 1.2.0 — held weapons, regen, target feedback
 - **The soldier actually holds the gun.** Upper and forearm bones are solved
   with analytic two-bone IK onto anchor points on the weapon itself (grip and
@@ -214,6 +247,10 @@ the whole game fits in roughly 630 KB of executable payload.
 npm install
 npm run dev            # http://localhost:5173 (live preview)
 npm run build:exe      # → release/Aetheris.exe + release/Aetheris.html
+npm run verify:all     # world, game, shaders, net, online, watchdog, update, updater, e2e
+npm run verify:update  # the page half of the self-updater
+npm run verify:updater # the launcher half: compiles the real C and drives it
+node tools/publish-release.mjs --dry-run   # validate a build without publishing
 npm run verify         # headless world build smoke test (no GPU needed)
 npm run verify:game    # headless combat/AI/pickup/match/audio simulation test
 npm run verify:e2e     # runs the real bundle in a stub DOM: menu → match → pause
@@ -257,8 +294,13 @@ src/game/input.js       keyboard/mouse, gamepad + P2 keyboard fallback
 src/game/match.js       score/time limits, stats, streaks, standings
 src/game/spawns.js      spawn & loot placement
 src/ui/hud.js           per-player HUD, minimap, enemy tracker
+src/ui/menu-chrome.js   version badge, change log panel, update line
+src/net/updater.js      release lookup, verified download, staging hand-off
 src/audio/ambience.js   procedural wind + drone
 src/audio/sfx.js        procedural guns, reloads, hits, match stings
-launcher/launcher.c     Win32 launcher (no dependencies)
+launcher/launcher.c     Win32 launcher, staged-update promotion
+launcher/localserver.c  loopback server: serves the game, receives updates
 tools/build-exe.mjs     single-file packager
+tools/publish-release.mjs  publishes a build so installed copies update
+docs/RELEASING.md       how an update reaches every existing install
 ```
