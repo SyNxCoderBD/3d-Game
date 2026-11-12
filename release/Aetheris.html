@@ -4914,16 +4914,27 @@ Update your graphics driver, or run the game in Edge / Chrome with hardware acce
 
   <!--
     Boot watchdog. main.js installs its own error handlers, but those cannot
-    run if main.js itself fails to load or parse — the page would sit on the
-    static "Awakening" text with no explanation. This inline script is the only
-    code guaranteed to run, so it catches module-level failures and shows them.
+    run if main.js itself fails to load or parse, so a module-level failure
+    would leave the page frozen on the static "Awakening" text with no
+    explanation. This inline script catches that case.
+
+    Scope matters: a page hosts more than its own scripts. Browser extensions
+    and hosting analytics (the preview proxy injects a Cloudflare beacon) can
+    fail to load at any time, and their failure must never be reported as the
+    game being broken. Only this origin's files are treated as ours, and only
+    until the game has announced that it booted.
   -->
   <script>
     (function () {
-      var shown = false;
+      var reported = false;
+
+      function gameHasBooted() {
+        return !!window.__aetherisBooted;
+      }
+
       function report(msg) {
-        if (shown) return;
-        shown = true;
+        if (reported || gameHasBooted()) return;
+        reported = true;
         var el = document.getElementById('fatal');
         var status = document.getElementById('loadStatus');
         if (status) status.textContent = 'Could not start';
@@ -4932,17 +4943,30 @@ Update your graphics driver, or run the game in Edge / Chrome with hardware acce
         if (box) box.textContent = msg;
         el.classList.add('show');
       }
+
+      // Is this URL one of ours? Same origin only. Anything else (analytics,
+      // extension resources, CDNs) is not something this game can be blamed for.
+      function isOwnScript(src) {
+        if (!src) return false;
+        try {
+          var u = new URL(src, location.href);
+          return u.origin === location.origin;
+        } catch (_) {
+          return false;
+        }
+      }
+
       window.addEventListener('error', function (e) {
-        // Resource (script/link) failures surface here with no message.
         var t = e.target;
         if (t && t.tagName === 'SCRIPT') {
-          report('A game script failed to load: ' + (t.src || 'unknown') +
-                 '\n\nIf this is the dev server, reload the page. If it persists, the build is incomplete.');
+          // Some other script on the page failed. If it is not ours, ignore it
+          // completely; if it is ours, say which file so it can be fixed.
+          if (!isOwnScript(t.src)) return;
+          report('A game script failed to load: ' + t.src +
+                 '\n\nReload the page. If it persists, the build is incomplete.');
           return;
         }
         var msg = e.message || String(e.error || 'Unknown error');
-        // Module graphs disagreeing is almost always a half-cached page: this
-        // error means one file was newer than another when they met.
         if (/does not provide an export named|does not export|Importing a module script failed/i.test(msg)) {
           report('The game loaded a mixture of old and new files.\n\n' +
                  'Press Ctrl+Shift+R (or Cmd+Shift+R) to reload everything from scratch.');
@@ -4950,13 +4974,18 @@ Update your graphics driver, or run the game in Edge / Chrome with hardware acce
         }
         report(msg);
       }, true);
+
       window.addEventListener('unhandledrejection', function (e) {
         var r = e.reason;
-        report(r && r.message ? r.message : String(r));
+        var msg = r && r.message ? r.message : String(r);
+        // Anything thrown after a successful boot is the game's own business to
+        // surface (it has its own handlers); only startup matters here.
+        report(msg);
       });
+
       // If the module never even starts, say so instead of pretending to load.
       setTimeout(function () {
-        if (window.__aetherisBooted) return;
+        if (gameHasBooted()) return;
         var status = document.getElementById('loadStatus');
         if (!status || status.textContent !== 'Awakening') return;
         report('The game did not start.\n\n' +

@@ -360,6 +360,13 @@ function findPing(a) {
   return pane?.ping || null;
 }
 
+function windowDispatch(type, event) {
+  const cbs = winListeners.get(type) || [];
+  const evt = { type, preventDefault() {}, stopPropagation() {}, ...event };
+  for (const cb of cbs) cb(evt);
+}
+function location() { return 'http://127.0.0.1:5173'; }
+
 let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => {
   if (cond) { pass++; console.log(`  ✓ ${name}${extra ? ' — ' + extra : ''}`); }
