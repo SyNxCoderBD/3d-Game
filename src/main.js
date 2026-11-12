@@ -26,28 +26,52 @@ import { BUILD_VERSION, mountMenuChrome } from './ui/menu-chrome.js';
 
 const $ = (id) => document.getElementById(id);
 
+/*
+ * Conditions that look like faults but are not.
+ *
+ * Pointer lock is the browser API this game leans on that refuses routinely:
+ * the lock cannot be taken immediately after the user pressed Escape, and some
+ * documents are not valid lock targets at all. Gamepads disappear and reappear
+ * mid-match. Those are ordinary events, not faults, and painting "something
+ * went wrong" over a perfectly healthy match is worse than the condition.
+ *
+ * This list is the single source of truth, and it is applied at *every* choke
+ * point — the error handlers, and fatal() itself. Filtering only in the
+ * handlers left the card reachable whenever anything called fatal() directly
+ * or a message slipped past one of them.
+ */
+const NOISE_PATTERNS = [
+  /pointer ?lock/i,
+  /exited the lock/i,
+  /not valid for pointer lock/i,
+  /gamepad/i,
+  /vibration ?actuator/i,
+];
+
+function isBenign(message) {
+  const text = String(message ?? '');
+  return NOISE_PATTERNS.some((re) => re.test(text));
+}
+
 function fatal(message) {
+  // Last line of defence: a benign condition must never paint the crash card,
+  // no matter which caller asked for it.
+  if (isBenign(message)) {
+    console.warn('[ignored benign error]', message);
+    return;
+  }
   const el = $('fatal');
   if (!el) return;
-  el.querySelector('.msg').textContent = message;
+  const box = el.querySelector('.msg');
+  if (box) box.textContent = message;
   el.classList.add('show');
 }
-/*
- * Pointer lock is the one browser API this game leans on that refuses
- * routinely: the lock cannot be taken immediately after the user pressed
- * Escape, and some documents are not valid lock targets at all. Those are
- * normal conditions, not faults, and showing "something went wrong" over a
- * perfectly healthy match is worse than the condition itself.
- *
- * The whole flow is handled where it happens (see KeyboardMouseInput), so by
- * the time anything reaches this far it is already a duplicate. Never let it
- * paint the fatal card.
- */
+
 function isPointerLockNoise(e) {
   const text = String(
     (e && (e.reason?.message || e.reason)) || (e && (e.error?.message || e.message)) || ''
   );
-  return /pointer lock|pointerlock/i.test(text);
+  return isBenign(text);
 }
 
 window.addEventListener('error', (e) => {
@@ -1655,22 +1679,41 @@ canvas.addEventListener('click', () => {
 function updatePadStatus() {
   const el = $('padStatus');
   if (!el) return;
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let count = 0;
-  for (const p of pads) if (p && p.connected) count++;
-  el.textContent = count > 0
-    ? `CONTROLLER DETECTED (${count}) — PLAYER 2 READY`
-    : 'NO CONTROLLER — PLAYER 2 CAN USE IJKL + ARROWS';
-  el.classList.toggle('ok', count > 0);
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+    if (pads) for (const p of pads) if (p && p.connected) count++;
+  } catch (_) {
+    /* getGamepads is unavailable in this embedding; the cached pad still works */
+  }
+  // Read the same latched device the game reads, so the label cannot disagree
+  // with the controls that are actually live.
+  const live = count > 0 || !!p1pad?.connected || !!(game.input2?.connected);
+  el.textContent = live
+    ? `CONTROLLER DETECTED — PLAYER 1 OR 2`
+    : 'NO CONTROLLER — USE THE KEYBOARD, OR PRESS A PAD BUTTON';
+  el.classList.toggle('ok', live);
 }
-setInterval(updatePadStatus, 800);
+// Cheap enough to run often, and often enough that pressing a pad button
+// reveals the controller within a frame or two rather than up to a second.
+setInterval(updatePadStatus, 250);
 
 // The lobby re-renders on every poll (1.5 s), which is too coarse to watch the
 // ping settle. Tick the readout on its own so it feels live while waiting.
 setInterval(() => {
   if (room.el?.classList.contains('show')) updatePingLine();
 }, 400);
-window.addEventListener('gamepadconnected', updatePadStatus);
+window.addEventListener('gamepadconnected', () => {
+  // Some browsers only reveal a pad after its first button press, so a fresh
+  // connection is also when the HUD most needs to be re-checked.
+  updatePadStatus();
+});
+window.addEventListener('gamepaddisconnected', () => {
+  // Drop the cached handle so the game stops driving a pad that has gone.
+  game.input1?.forgetPad?.();
+  p1pad?.forgetPad?.();
+  updatePadStatus();
+});
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);

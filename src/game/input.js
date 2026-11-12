@@ -47,6 +47,10 @@ export class KeyboardMouseInput {
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
+      if (this.locked && this._retryTimer) {
+        clearTimeout(this._retryTimer);
+        this._retryTimer = null;
+      }
       if (!this.locked && this.lookMode === 'lock') this.onLockLost?.();
     });
     document.addEventListener('pointerlockerror', (e) => {
@@ -93,7 +97,13 @@ export class KeyboardMouseInput {
    * rejection right after Escape simply waits instead of forcing drag-look on
    * a player who is about to click back in.
    */
-  requestLock() {
+  requestLock(retries = 0) {
+    // A deliberate new request supersedes any retry still waiting, or clicks
+    // would stack timers and fight each other.
+    if (retries === 0 && this._retryTimer) {
+      clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+    }
     // Both attempts are chained through one helper so neither can leave a
     // rejected promise unobserved: a second unhandled rejection while retrying
     // the fallback would produce exactly the error card this is meant to stop.
@@ -101,13 +111,16 @@ export class KeyboardMouseInput {
       let p;
       try {
         p = opts ? this.dom.requestPointerLock?.(opts) : this.dom.requestPointerLock?.();
-      } catch (_) {
-        onFail();
+      } catch (err) {
+        onFail(err);
         return;
       }
       if (p && typeof p.then === 'function') {
         p.then(
-          () => { this.lockError = null; },
+          () => {
+            this.lockError = null;
+            if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+          },
           (err) => onFail(err)
         );
       }
@@ -117,7 +130,7 @@ export class KeyboardMouseInput {
       attempt(null, () => { this.lookMode = 'drag'; });
     };
 
-    attempt({ unadjustedMovement: true }, (err) => this._onLockFailed(err, fallback));
+    attempt({ unadjustedMovement: true }, (err) => this._onLockFailed(err, fallback, retries));
   }
 
   /**
@@ -126,16 +139,29 @@ export class KeyboardMouseInput {
    * that window the correct response is to stay paused and let the player click
    * again, not to switch input modes or report an error.
    */
-  _onLockFailed(err, fallback) {
+  _onLockFailed(err, fallback, retries = 0) {
     const name = err?.name || '';
     const message = String(err?.message || '');
     const tooSoon = name === 'SecurityError' || /exited the lock|not valid for pointer lock/i.test(message);
     this.lockError = message || name || 'pointer lock refused';
 
     if (tooSoon) {
-      // Keep 'lock' mode: one more click retries it. Switching modes here would
-      // silently turn every mouse-look into a drag, which is not what the player
-      // asked for and cannot be undone without a reload.
+      // Keep 'lock' mode: switching here would silently turn every mouse-look
+      // into a drag, which is not what the player asked for and cannot be
+      // undone without a reload.
+      //
+      // The cooldown is short and it is time-based, not input-based, so retry
+      // through it instead of making the player click again and again. The
+      // retries back off and stop after a few attempts, at which point the
+      // refusal is reported once and the player can click to try again.
+      if (retries < 4 && this.enabled) {
+        const delay = 120 * (retries + 1);
+        this._retryTimer = setTimeout(() => {
+          this._retryTimer = null;
+          if (this.enabled && !this.locked) this.requestLock(retries + 1);
+        }, delay);
+        return;
+      }
       this.onLockRefused?.();
       return;
     }
@@ -317,19 +343,60 @@ export class GamepadInput {
     this.enabled = false;
     this.prevButtons = [];
     this.rumbleUntil = 0;
+    this._lastPad = null;
   }
 
+  /**
+   * The connected pad, or null.
+   *
+   * navigator.getGamepads() is hostile to naive polling. It throws in some
+   * embeddings, it can return null, and — the part that made the controller
+   * look "sometimes not detected" — many browsers only start reporting a pad
+   * on the first *button press or stick movement*, and the array's entries can
+   * briefly be null. Polling it independently from the frame loop and from the
+   * status readout meant the two disagreed and the HUD flickered between
+   * "detected" and "no controller" while the pad was sitting right there.
+   *
+   * So: read it defensively, remember the last non-null pad, and only ever
+   * report it missing after the browser has told us it disconnected.
+   */
   get pad() {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    if (!pads) return null;
-    // Prefer the requested index, fall back to the first connected pad.
-    if (pads[this.index] && pads[this.index].connected) return pads[this.index];
-    for (const p of pads) if (p && p.connected) return p;
-    return null;
+    try {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+      if (pads) {
+        // Prefer this device's slot, then any other live pad.
+        const own = pads[this.index];
+        if (own && own.connected) {
+          this._lastPad = own;
+          return own;
+        }
+        for (const p of pads) {
+          if (p && p.connected) {
+            this._lastPad = p;
+            return p;
+          }
+        }
+      }
+    } catch (_) {
+      /* getGamepads is not available here; fall back to the cached pad */
+    }
+    // A pad we have seen before stays usable until an explicit disconnect,
+    // because a momentary null in the array is not a disconnect.
+    return this._lastPad || null;
   }
 
   get connected() {
-    return !!this.pad;
+    try {
+      return !!this.pad;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** Forget the cached pad; called on the browser's disconnect event. */
+  forgetPad() {
+    this._lastPad = null;
+    this.prevButtons = [];
   }
 
   static dz(v, d) {
@@ -359,13 +426,37 @@ export class GamepadInput {
 
   poll(dt) {
     const out = EMPTY_INPUT();
-    const pad = this.pad;
+    // Every call into a gamepad is wrapped: a pad can disappear mid-frame, and
+    // driver-specific objects can throw on a stale handle. None of that should
+    // be able to reach the fatal card or abort a frame.
+    let pad = null;
+    try {
+      pad = this.pad;
+      if (pad && pad.connected === false) {
+        this.forgetPad();
+        pad = null;
+      }
+    } catch (_) {
+      pad = null;
+    }
     if (!pad || !this.enabled) {
       this.prevButtons = [];
       return out;
     }
 
-    const [lx = 0, ly = 0, rx = 0, ry = 0] = pad.axes;
+    try {
+      this._readPad(pad, dt, out);
+    } catch (_) {
+      // A pad that throws while being read is treated as absent for this frame
+      // rather than taking the match down with it.
+      this.prevButtons = [];
+    }
+    return out;
+  }
+
+  _readPad(pad, dt, out) {
+    const axes = pad.axes || [];
+    const [lx = 0, ly = 0, rx = 0, ry = 0] = axes;
     out.strafe = GamepadInput.dz(lx, this.deadzone);
     out.forward = -GamepadInput.dz(ly, this.deadzone);
 
@@ -374,8 +465,9 @@ export class GamepadInput {
     out.lookX = lookX * this.lookSpeed * dt * (1 + Math.abs(lookX) * 0.7);
     out.lookY = lookY * this.lookSpeed * dt * 0.8 * (1 + Math.abs(lookY) * 0.7);
 
-    const btn = (i) => !!(pad.buttons[i] && pad.buttons[i].pressed);
-    const val = (i) => (pad.buttons[i] ? pad.buttons[i].value : 0);
+    const buttons = pad.buttons || [];
+    const btn = (i) => !!(buttons[i] && buttons[i].pressed);
+    const val = (i) => (buttons[i] ? (buttons[i].value || 0) : 0);
     const edge = (i) => btn(i) && !this.prevButtons[i];
 
     out.fire = val(7) > 0.35;
@@ -390,7 +482,7 @@ export class GamepadInput {
     if (edge(14)) out.slot = 1;
     if (edge(15)) out.slot = 2;
 
-    this.prevButtons = pad.buttons.map((b) => b.pressed);
+    this.prevButtons = buttons.map((b) => !!b && !!b.pressed);
     return out;
   }
 }

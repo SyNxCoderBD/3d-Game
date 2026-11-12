@@ -775,8 +775,18 @@
         return !!window.__aetherisBooted;
       }
 
+      // Conditions that are not startup failures: pointer lock refusing (it is
+      // routinely refused right after Escape) and gamepads coming and going.
+      // Declared here as well as in main.js because this watchdog runs before
+      // the game module exists and must not paint the card for them either.
+      function benign(msg) {
+        return /pointer ?lock|exited the lock|not valid for pointer lock|gamepad|vibration ?actuator/i
+          .test(String(msg || ''));
+      }
+
       function report(msg) {
         if (reported || gameHasBooted()) return;
+        if (benign(msg)) return;
         reported = true;
         var el = document.getElementById('fatal');
         var status = document.getElementById('loadStatus');

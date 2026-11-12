@@ -80,12 +80,21 @@ async function main() {
     kbm.onFallbackMode = () => fellBack++;
     dom.el.pointerLockImpl = () => Promise.reject(err);
     kbm.requestLock();
-    // Give the rejection a tick to run.
+    // Give the rejection, and the retries it schedules, time to run. The
+    // refusal is only reported once the retries are exhausted, so nothing
+    // should be announced immediately.
     await new Promise((r) => setTimeout(r, 0));
-    check(`survives ${label}`, () => {
+    check(`does not give up immediately on ${label}`, () => {
       assert.equal(kbm.lookMode, 'lock', 'must not silently switch to drag-look');
-      assert.equal(refused, 1, 'should ask for another click');
+      assert.equal(refused, 0, 'should keep retrying before asking for a click');
       assert.equal(fellBack, 0, 'must not report a fallback for a cooldown');
+    });
+    // Let the backoff finish (120+240+360+480 ms) and confirm the mode held.
+    await new Promise((r) => setTimeout(r, 1300));
+    check(`survives ${label}`, () => {
+      assert.equal(kbm.lookMode, 'lock', 'must never degrade to drag-look');
+      assert.ok(refused >= 1, 'should ask for another click once retries fail');
+      assert.equal(fellBack, 0, 'still not a fallback');
     });
   }
 
@@ -225,6 +234,61 @@ async function main() {
     check('hybrid: disabling turns off both devices', () => assert.ok(!kbmEnabled && !padEnabled));
   }
 
+  /* -------------------------------------------------------------- pad safety */
+
+  // navigator.getGamepads can throw, return null, or contain holes. None of
+  // that may escape: it runs every frame.
+  {
+    const realNavigator = globalThis.navigator;
+    const setNav = (getGamepads) => {
+      Object.defineProperty(globalThis, 'navigator', { value: { getGamepads }, configurable: true });
+    };
+
+    const g = new GamepadInput(0);
+    g.enabled = true;
+
+    setNav(() => { throw new Error('getGamepads exploded'); });
+    check('a throwing getGamepads does not escape poll()', () => {
+      const out = g.poll(1 / 60);
+      assert.equal(out.forward, 0);
+      assert.equal(g.connected, false);
+    });
+
+    setNav(() => null);
+    check('a null gamepad list is handled', () => {
+      assert.equal(g.connected, false);
+      assert.equal(g.poll(1 / 60).fire, false);
+    });
+
+    // A live pad with no buttons array must not throw.
+    const halfPad = { index: 0, connected: true, axes: [0, 0, 0, 0] };
+    setNav(() => [halfPad]);
+    check('a pad missing its buttons array is handled', () => {
+      const out = g.poll(1 / 60);
+      assert.equal(typeof out.forward, 'number');
+      assert.equal(out.fire, false);
+    });
+
+    // The latch: a momentary null in the list is not a disconnect.
+    const goodPad = {
+      index: 0, connected: true, axes: [0, -1, 0, 0],
+      buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })),
+    };
+    setNav(() => [goodPad]);
+    g.poll(1 / 60);
+    check('a present pad is detected', () => assert.equal(g.connected, true));
+
+    setNav(() => [null, null, null, null]);
+    check('a momentary null list does not lose the pad', () => assert.equal(g.connected, true));
+
+    // An explicit disconnect does drop it.
+    Object.defineProperty(goodPad, 'connected', { value: false, configurable: true });
+    g.poll(1 / 60);
+    check('a real disconnect is honoured', () => assert.equal(g.connected, false));
+
+    Object.defineProperty(globalThis, 'navigator', { value: realNavigator, configurable: true });
+  }
+
   /* ------------------------------------------------------------ aim assist */
 
   // The assist maths, isolated from the scene: verify the properties that make
@@ -301,6 +365,40 @@ async function main() {
       assert.ok(/varying vec3 vLocal/.test(sky), 'vertex stage should pass raw position');
       assert.ok(/normalize\(vLocal\)/.test(sky), 'fragment stage should normalise it');
       assert.ok(!/varying vec3 vDir/.test(sky), 'the interpolated unit vector must be gone');
+    });
+  }
+
+  /* ------------------------------------------------- the fatal card itself */
+
+  // The screenshot was a crash card reading "Pointer lock cannot be acquired
+  // immediately after the user has exited the lock." Filtering the error
+  // handlers was not enough — anything calling fatal() directly, or a message
+  // that slipped past one handler, still painted it. The filter belongs at the
+  // choke point.
+  {
+    const { readFileSync } = await import('node:fs');
+    const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+    check('fatal() refuses benign messages at the choke point', () => {
+      const fn = main.slice(main.indexOf('function fatal('), main.indexOf('function fatal(') + 600);
+      assert.ok(/isBenign\(message\)/.test(fn), 'fatal() must test the message itself');
+      assert.ok(/return;/.test(fn), 'and bail out before showing the card');
+    });
+    check('the benign list covers pointer lock and pads', () => {
+      const block = main.slice(main.indexOf('NOISE_PATTERNS'), main.indexOf('NOISE_PATTERNS') + 500);
+      for (const needle of ['pointer ?lock', 'exited the lock', 'not valid for pointer lock', 'gamepad']) {
+        assert.ok(block.includes(needle), `missing pattern: ${needle}`);
+      }
+    });
+    check('the boot watchdog filters the same messages', () => {
+      const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+      const wd = html.slice(html.indexOf('function benign('), html.indexOf('function benign(') + 400);
+      assert.ok(/pointer ?lock/.test(wd), 'watchdog must know pointer lock is benign');
+      assert.ok(/if \(benign\(msg\)\) return;/.test(html), 'and drop them before reporting');
+    });
+    check('a lock refusal retries instead of failing outright', () => {
+      const input = readFileSync(new URL('../src/game/input.js', import.meta.url), 'utf8');
+      assert.ok(/_retryTimer = setTimeout/.test(input), 'should schedule a retry through the cooldown');
+      assert.ok(/retries < 4/.test(input), 'and stop after a bounded number of attempts');
     });
   }
 
