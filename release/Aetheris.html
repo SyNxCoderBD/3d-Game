@@ -600,7 +600,303 @@
   #fatal h2 { font-size: 12px; letter-spacing: 0.4em; text-transform: uppercase; color: #e5a1a1; margin: 0 0 18px; }
   #fatal .msg { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.7; color: #cdd8ca; white-space: pre-wrap; max-width: 640px; }
 </style>
+  
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="loader">
+    <div class="mark">AETHERIS</div>
+    <div class="sub">Island Warfare</div>
+    <div class="track"><div id="loadBar"></div></div>
+    <div id="loadStatus">Awakening</div>
+  </div>
+
+  <div id="menu">
+    <div class="menuInner">
+      <h1 class="title">AETHERIS</h1>
+      <p class="tagline">Island Warfare</p>
+
+      <div class="modes">
+        <div class="modeCard" id="btnSolo">
+          <h2>1P · BOT PRACTICE</h2>
+          <p>Drop into the island alone against ruthless AI squads. Loot rifles, shotguns, armour and med kits — last one standing wins the firefight.</p>
+          <span class="kbd">KEYBOARD + MOUSE &nbsp;·&nbsp; OR A CONTROLLER</span>
+          <div>
+            <select id="botCount">
+              <option value="2">2 BOTS</option>
+              <option value="4" selected>4 BOTS</option>
+              <option value="6">6 BOTS</option>
+              <option value="8">8 BOTS</option>
+            </select>
+          </div>
+        </div>
+        <div class="modeCard highlight" id="btnDuo">
+          <h2>2P · SPLIT SCREEN DUEL</h2>
+          <p>Two players, one island, one screen. Player 1 on keyboard and mouse, Player 2 on a controller — or on the arrow-cluster keys if no pad is plugged in.</p>
+          <span class="kbd">P1 KEYBOARD + MOUSE &nbsp;·&nbsp; P2 GAMEPAD / KEYS</span>
+          <div>
+            <select id="killLimit">
+              <option value="10">FIRST TO 10</option>
+              <option value="15" selected>FIRST TO 15</option>
+              <option value="20">FIRST TO 20</option>
+              <option value="30">FIRST TO 30</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="modeCard online" id="btnOnline">
+        <h2>ONLINE · ROOM CODE</h2>
+        <p>Play a friend across the internet on one shared island. Host a room and
+           read them the code, or type the code they give you. No split screen —
+           you each get a full-screen view.</p>
+        <span class="kbd">KEYBOARD + MOUSE &nbsp;·&nbsp; GAMEPAD</span>
+      </div>
+
+      <div class="controlsGrid">
+        <div>
+          <h3>PLAYER 1 — KEYBOARD + MOUSE OR CONTROLLER</h3>
+          <div><span>WASD</span> <i>move</i> &nbsp; <span>MOUSE</span> <i>look</i></div>
+          <div><span>LMB</span> <i>fire</i> &nbsp; <span>RMB</span> <i>aim</i> &nbsp; <span>R</span> <i>reload</i></div>
+          <div><span>SHIFT</span> <i>sprint</i> &nbsp; <span>SPACE</span> <i>jump</i> &nbsp; <span>CTRL</span> <i>crouch</i></div>
+          <div><span>Q</span> <i>med kit</i> &nbsp; <span>F</span> <i>swap</i> &nbsp; <span>1 2 3</span> <i>weapon slots</i></div>
+          <div><span>T</span> <i>time of day</i> &nbsp; <span>M</span> <i>mute</i> &nbsp; <span>ESC</span> <i>pause</i></div>
+          <div style="margin-top:10px"><h3>PLAYER 1 — CONTROLLER (ANY MODE)</h3></div>
+          <div><span>STICKS</span> <i>move / look</i> &nbsp; <span>RT</span> <i>fire</i> &nbsp; <span>LT</span> <i>aim</i></div>
+          <div><span>A</span> <i>jump</i> &nbsp; <span>X</span> <i>reload</i> &nbsp; <span>B / RB</span> <i>swap</i></div>
+          <div><span>LB</span> <i>sprint</i> &nbsp; <span>R3</span> <i>crouch</i> &nbsp; <span>Y</span> <i>med kit</i></div>
+          <div><span>D-PAD</span> <i>weapon slots</i> &nbsp; <span>STICK</span> <i>aim assist when you use it</i></div>
+        </div>
+        <div>
+          <h3>PLAYER 2 — CONTROLLER</h3>
+          <div><span>STICKS</span> <i>move / look</i></div>
+          <div><span>RT</span> <i>fire</i> &nbsp; <span>LT</span> <i>aim</i> &nbsp; <span>X</span> <i>reload</i></div>
+          <div><span>A</span> <i>jump</i> &nbsp; <span>LB</span> <i>sprint</i> &nbsp; <span>R3</span> <i>crouch</i></div>
+          <div><span>Y</span> <i>med kit</i> &nbsp; <span>B / RB</span> <i>swap</i> &nbsp; <span>D-PAD</span> <i>slots</i></div>
+          <div style="margin-top:10px"><h3>PLAYER 2 — NO PAD? KEYS</h3></div>
+          <div><span>IJKL</span> <i>move</i> &nbsp; <span>ARROWS</span> <i>look</i></div>
+          <div><span>ENTER</span> <i>fire</i> &nbsp; <span>RSHIFT</span> <i>aim</i> &nbsp; <span>.</span> <i>reload</i></div>
+          <div><span>'</span> <i>jump</i> &nbsp; <span>\</span> <i>sprint</i> &nbsp; <span>RCTRL</span> <i>crouch</i></div>
+          <div><span>,</span> <i>med kit</i> &nbsp; <span>/</span> <i>swap weapon</i></div>
+        </div>
+      </div>
+
+      <p id="padStatus">NO CONTROLLER — PLAYER 2 NEEDS ONE</p>
+
+      <div class="menuFoot">
+        <span class="build">BUILD <b id="menuVersion">—</b></span>
+        <button class="linkbtn" id="btnChangelog">Change log</button>
+        <span id="updateStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="changelog">
+    <div class="clPanel">
+      <h2>CHANGE LOG</h2>
+      <p class="clSub" id="changelogSub">Every released version, newest first</p>
+      <div id="changelogBody"></div>
+      <button class="ghostBtn clClose" id="btnChangelogClose">Back</button>
+    </div>
+  </div>
+
+  <div id="hudRoot"></div>
+  <div id="fps">– FPS</div>
+
+  <div id="room">
+    <div class="roomPanel">
+      <h1 class="roomTitle">ONLINE MATCH</h1>
+      <p class="roomSub" id="roomSub">HOST A ROOM OR JOIN WITH A CODE</p>
+
+      <div class="roomRow">
+        <label for="playerName">YOUR NAME</label>
+        <input id="playerName" maxlength="14" placeholder="PLAYER" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="roomSplit" id="roomChooser">
+        <div class="roomHalf">
+          <h3>HOST</h3>
+          <div class="roomRow"><label for="roomKills">FIRST TO</label>
+            <select id="roomKills">
+              <option value="10">10 KILLS</option>
+              <option value="15" selected>15 KILLS</option>
+              <option value="20">20 KILLS</option>
+            </select>
+          </div>
+          <button class="bigBtn" id="btnHost">CREATE ROOM</button>
+        </div>
+        <div class="roomHalf">
+          <h3>JOIN</h3>
+          <div class="roomRow"><label for="roomCode">ROOM CODE</label>
+            <input id="roomCode" maxlength="5" placeholder="ABC12" autocomplete="off" spellcheck="false">
+          </div>
+          <button class="bigBtn" id="btnJoin">JOIN ROOM</button>
+        </div>
+      </div>
+
+      <div id="roomLobby" class="roomLobby">
+        <div class="roomCodeLine">
+          <span>ROOM CODE</span>
+          <b id="roomCodeValue">-----</b>
+          <button id="btnCopyCode" title="Copy">COPY</button>
+        </div>
+        <ul id="roomRoster"></ul>
+        <div class="roomMeta">
+          <span id="roomPingLine">PING &#8212;</span>
+          <span id="roomLatencyHint"></span>
+        </div>
+        <button class="bigBtn primary" id="btnStartOnline">WAITING FOR PLAYERS</button>
+        <p class="roomHint" id="roomHint">Share the code. The match starts when the host is ready.</p>
+      </div>
+
+      <p class="roomError" id="roomError"></p>
+      <button class="ghostBtn" id="btnRoomBack">BACK</button>
+    </div>
+  </div>
+
+  <div id="pause">
+    <div class="overlayTitle">PAUSED</div>
+    <div class="overlaySub">Click anywhere to resume</div>
+    <div class="pauseGrid" id="pauseGrid">
+      <div class="pauseRow"><span>Volume</span><input type="range" id="optVolume" min="0" max="100" step="5" value="90" /></div>
+      <div class="pauseRow"><span>Render quality</span>
+        <select id="optQuality">
+          <option value="auto" selected>AUTO</option>
+          <option value="high">HIGH</option>
+          <option value="balanced">BALANCED</option>
+          <option value="low">LOW</option>
+        </select>
+      </div>
+      <div class="pauseRow"><span>Bot difficulty</span>
+        <select id="optDifficulty">
+          <option value="easy" selected>EASY</option>
+          <option value="normal">NORMAL</option>
+          <option value="hard">HARD</option>
+        </select>
+      </div>
+      <div class="pauseRow"><span>Controller sensitivity</span>
+        <input type="range" id="optPadSens" min="20" max="200" step="5" value="75" />
+      </div>
+      <div class="pauseRow"><span>Controller rumble</span>
+        <select id="optRumble">
+          <option value="on" selected>ON</option>
+          <option value="off">OFF</option>
+        </select>
+      </div>
+      <button class="ghostBtn" id="btnQuit">Quit to menu</button>
+      <div class="pauseHint">ESC also resumes</div>
+    </div>
+  </div>
+
+  <div id="victory">
+    <div id="victoryBody"></div>
+    <div class="pauseGrid">
+      <button class="ghostBtn" id="btnRematch">Rematch <span class="keyhint">ENTER</span></button>
+      <button class="ghostBtn" id="btnVictoryMenu">Back to menu <span class="keyhint">ESC</span></button>
+    </div>
+  </div>
+
+  <div id="fatal">
+    <div class="box">
+      <h2>Something went wrong</h2>
+      <div class="msg"></div>
+    </div>
+  </div>
+
+  <!--
+    Boot watchdog. main.js installs its own error handlers, but those cannot
+    run if main.js itself fails to load or parse, so a module-level failure
+    would leave the page frozen on the static "Awakening" text with no
+    explanation. This inline script catches that case.
+
+    Scope matters: a page hosts more than its own scripts. Browser extensions
+    and hosting analytics (the preview proxy injects a Cloudflare beacon) can
+    fail to load at any time, and their failure must never be reported as the
+    game being broken. Only this origin's files are treated as ours, and only
+    until the game has announced that it booted.
+  -->
   <script>
+    (function () {
+      var reported = false;
+
+      function gameHasBooted() {
+        return !!window.__aetherisBooted;
+      }
+
+      // Conditions that are not startup failures: pointer lock refusing (it is
+      // routinely refused right after Escape) and gamepads coming and going.
+      // Declared here as well as in main.js because this watchdog runs before
+      // the game module exists and must not paint the card for them either.
+      function benign(msg) {
+        return /pointer ?lock|exited the lock|not valid for pointer lock|gamepad|vibration ?actuator/i
+          .test(String(msg || ''));
+      }
+
+      function report(msg) {
+        if (reported || gameHasBooted()) return;
+        if (benign(msg)) return;
+        reported = true;
+        var el = document.getElementById('fatal');
+        var status = document.getElementById('loadStatus');
+        if (status) status.textContent = 'Could not start';
+        if (!el) return;
+        var box = el.querySelector('.msg');
+        if (box) box.textContent = msg;
+        el.classList.add('show');
+      }
+
+      // Is this URL one of ours? Same origin only. Anything else (analytics,
+      // extension resources, CDNs) is not something this game can be blamed for.
+      function isOwnScript(src) {
+        if (!src) return false;
+        try {
+          var u = new URL(src, location.href);
+          return u.origin === location.origin;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      window.addEventListener('error', function (e) {
+        var t = e.target;
+        if (t && t.tagName === 'SCRIPT') {
+          // Some other script on the page failed. If it is not ours, ignore it
+          // completely; if it is ours, say which file so it can be fixed.
+          if (!isOwnScript(t.src)) return;
+          report('A game script failed to load: ' + t.src +
+                 '\n\nReload the page. If it persists, the build is incomplete.');
+          return;
+        }
+        var msg = e.message || String(e.error || 'Unknown error');
+        if (/does not provide an export named|does not export|Importing a module script failed/i.test(msg)) {
+          report('The game loaded a mixture of old and new files.\n\n' +
+                 'Press Ctrl+Shift+R (or Cmd+Shift+R) to reload everything from scratch.');
+          return;
+        }
+        report(msg);
+      }, true);
+
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e.reason;
+        var msg = r && r.message ? r.message : String(r);
+        // Anything thrown after a successful boot is the game's own business to
+        // surface (it has its own handlers); only startup matters here.
+        report(msg);
+      });
+
+      // If the module never even starts, say so instead of pretending to load.
+      setTimeout(function () {
+        if (gameHasBooted()) return;
+        var status = document.getElementById('loadStatus');
+        if (!status || status.textContent !== 'Awakening') return;
+        report('The game did not start.\n\n' +
+               'Open the browser console (F12) for the exact error, then reload.\n' +
+               'If you are running from a file, make sure you launched Aetheris.exe.');
+      }, 12000);
+    })();
+  </script>
+<script>
 (function(){"use strict";/**
  * @license
  * Copyright 2010-2024 Three.js Authors
@@ -4897,7 +5193,7 @@ Suggested solution: ${t.workaround}`),new Error(e)}static isWebSocketSupported()
           <tr><th class="rank">#</th><th class="who">PLAYER</th>${n.map(o=>`<th>${o}</th>`).join("")}</tr>
         </thead>
         <tbody>${r}</tbody>
-      </table>`}}class o_{constructor(){this.ctx=null,this.master=null,this.muted=!1,this.started=!1}start(){if(this.started){this.ctx&&this.ctx.state==="suspended"&&this.ctx.resume();return}try{const t=window.AudioContext||window.webkitAudioContext;if(!t)return;const e=new t;this.ctx=e,this.started=!0;const n=e.createGain();n.gain.value=0,n.connect(e.destination),this.master=n;const r=e.createBuffer(2,e.sampleRate*6,e.sampleRate);for(let g=0;g<2;g++){const _=r.getChannelData(g);let m=0;for(let p=0;p<_.length;p++){const x=Math.random()*2-1;m=(m+.02*x)/1.02,_[p]=m*3.2}}const o=e.createBufferSource();o.buffer=r,o.loop=!0;const a=e.createBiquadFilter();a.type="lowpass",a.frequency.value=520,a.Q.value=.6;const l=e.createGain();l.gain.value=.5;const c=e.createOscillator();c.frequency.value=.07;const h=e.createGain();h.gain.value=.22,c.connect(h),h.connect(l.gain),c.start();const u=e.createOscillator();u.frequency.value=.045;const f=e.createGain();f.gain.value=260,u.connect(f),f.connect(a.frequency),u.start(),o.connect(a),a.connect(l),l.connect(n),o.start();const d=e.createGain();d.gain.value=.055,d.connect(n),[55,82.5,110].forEach((g,_)=>{const m=e.createOscillator();m.type="sine",m.frequency.value=g*(1+(_-1)*.002);const p=e.createGain();p.gain.value=_===0?1:.35,m.connect(p),p.connect(d),m.start()}),this.volume??(this.volume=.5),n.gain.setTargetAtTime(this.volume,e.currentTime,2)}catch(t){console.warn("Audio unavailable:",t)}}setMuted(t){this.muted=t,this._applyVolume(.15)}setVolume(t){this.volume=Math.max(0,Math.min(1,t)),this._applyVolume(.15)}_applyVolume(t){if(this.volume??(this.volume=.5),this.master&&this.ctx){const e=this.muted?0:this.volume;this.master.gain.setTargetAtTime(e,this.ctx.currentTime,t)}}toggle(){return this.setMuted(!this.muted),this.muted}}const zc="aetheris_releases",a_=2e4;function l_(i,t){const e=o=>String(o??"").trim().replace(/^v/i,"").split(".").map(a=>{const l=parseInt(a,10);return Number.isFinite(l)?l:0}),n=e(i),s=e(t),r=Math.max(n.length,s.length);for(let o=0;o<r;o++){const a=n[o]??0,l=s[o]??0;if(a!==l)return a-l}return 0}function Gc(i){i?.href;const t=i?.hostname??"",e=i?.port??"",n=t==="127.0.0.1"||t==="localhost"||t==="[::1]";return!i?.protocol?.startsWith("http")||!n||!e?null:{base:`${i.protocol}//${t}:${e}`,staged:`${i.protocol}//${t}:${e}/__aetheris/staged`}}async function Hc({url:i,anonKey:t,channel:e="stable",table:n=zc,timeoutMs:s=a_,fetchImpl:r=fetch}={}){if(!i||!t)throw new Error("supabase url and anon key are required");const o=`${i.replace(/\/+$/,"")}/rest/v1/${n}?select=version,channel,release_no,notes,released_at,size_bytes,sha256&channel=eq.${encodeURIComponent(e)}&published=eq.true&order=release_no.desc&limit=1`,a=new AbortController,l=setTimeout(()=>a.abort(),s);try{const c=await r(o,{headers:{apikey:t,Authorization:`Bearer ${t}`},signal:a.signal,cache:"no-store"});if(!c.ok)throw new Error(`release lookup failed (${c.status})`);const h=await c.json();if(!Array.isArray(h)||h.length===0)return null;const u=h[0];if(!u.version||!u.sha256)throw new Error("release row is incomplete");return{version:String(u.version),channel:String(u.channel??e),releaseNo:Number(u.release_no??0),notes:String(u.notes??""),releasedAt:String(u.released_at??""),sizeBytes:Number(u.size_bytes??0),sha256:String(u.sha256).toLowerCase()}}finally{clearTimeout(l)}}function c_({url:i,version:t,sha256:e,table:n=zc}){const s=i.replace(/\/+$/,"");return[`${s}/storage/v1/object/public/${n}/${encodeURIComponent(t)}.html`,`${s}/rest/v1/aetheris_release_payload?select=html&version=eq.${encodeURIComponent(t)}`].map(r=>({url:r,kind:r.includes("/storage/")?"binary":"json",version:t,sha256:e}))}async function h_(i,t=globalThis.crypto?.subtle){if(!t)throw new Error("SubtleCrypto is unavailable");const e=i instanceof Uint8Array?i:new Uint8Array(i),n=await t.digest("SHA-256",e);return Array.from(new Uint8Array(n)).map(s=>s.toString(16).padStart(2,"0")).join("")}async function u_(i,{url:t,anonKey:e,timeoutMs:n=6e4,fetchImpl:s=fetch,subtle:r}={}){const o={apikey:e,Authorization:`Bearer ${e}`},a=[];for(const l of c_({url:t,version:i.version,sha256:i.sha256})){const c=new AbortController,h=setTimeout(()=>c.abort(),n);try{const u=await s(l.url,{headers:l.kind==="json"?{...o,Accept:"application/json"}:o,signal:c.signal,cache:"no-store"});if(!u.ok){a.push(`${l.kind}: HTTP ${u.status}`);continue}let f;if(l.kind==="json"){const _=await u.json();if(f=Array.isArray(_)&&_.length?_[0].html:null,typeof f!="string"||!f){a.push("json: empty payload");continue}}else{const _=await u.arrayBuffer();f=new TextDecoder("utf-8",{fatal:!0}).decode(_)}const d=new TextEncoder().encode(f),g=await h_(d,r);if(g!==i.sha256){a.push(`${l.kind}: sha256 mismatch`);continue}if(!/<!doctype html/i.test(f.slice(0,200))){a.push(`${l.kind}: not an html document`);continue}return{html:f,bytes:d.length,sha256:g,transport:l.kind}}catch(u){a.push(`${l.kind}: ${u?.message??u}`)}finally{clearTimeout(h)}}throw new Error(`could not download ${i.version} (${a.join("; ")})`)}async function d_(i,t,{timeoutMs:e=3e4,fetchImpl:n=fetch}={}){const s=new AbortController,r=setTimeout(()=>s.abort(),e);try{const o=await n(i,{method:"POST",headers:{"Content-Type":"text/html; charset=utf-8"},body:t,signal:s.signal}),a=await o.text();if(!o.ok)throw new Error(`launcher refused the update (${o.status}) ${a.slice(0,80)}`);if(!/staged/i.test(a))throw new Error(`launcher did not stage the update (${a.slice(0,80)})`);return a}finally{clearTimeout(r)}}async function f_({currentVersion:i,location:t=globalThis.location,supabaseUrl:e,anonKey:n,channel:s="stable",onStatus:r=()=>{},...o}={}){const a=Gc(t);if(!a)return{state:"unsupported"};let l;try{r("checking"),l=await Hc({url:e,anonKey:n,channel:s,...o})}catch(c){return r("offline"),{state:"offline",error:c?.message??String(c)}}if(!l)return r("current"),{state:"current",latest:null};if(l_(l.version,i)<=0)return r("current"),{state:"current",latest:l};try{r("downloading",l);const c=await u_(l,{url:e,anonKey:n,...o});return await d_(a.staged,c.html,o),r("staged",l),{state:"staged",latest:l,bytes:c.bytes,transport:c.transport}}catch(c){return r("failed",l),{state:"failed",latest:l,error:c?.message??String(c)}}}function ca(i){const t=String(i??"").trim();return t?t.toLowerCase().startsWith("v")?t:`v${t}`:""}const p_=5e3;function m_({location:i=globalThis.location,fetchImpl:t=globalThis.fetch,intervalMs:e=p_,setIntervalImpl:n=globalThis.setInterval,clearIntervalImpl:s=globalThis.clearInterval}={}){const r=Gc(i);if(!r)return{stop(){},url:null};const o=`${r.base}/__aetheris/alive`;let a=null,l=!1;const c=()=>{if(!l)try{t?.(o,{cache:"no-store",keepalive:!0})?.catch?.(()=>{})}catch{}};c();try{a=n?.(c,e)??null}catch{a=null}return{url:o,stop(){if(l=!0,a!==null){try{s?.(a)}catch{}a=null}}}}const Fs=(()=>{try{return"1.5.2"}catch{return"0.0.0-dev"}})(),xi=i=>document.getElementById(i),g_={checking:"CHECKING FOR UPDATES",downloading:"DOWNLOADING A NEWER BUILD",staged:"UPDATE READY · RESTART TO PLAY IT",current:"",offline:"",failed:""};function ha(i){return String(i).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}function __(i){const t=new Date(i);return Number.isNaN(t.getTime())?"":t.toISOString().slice(0,10)}function v_(i,t,e=xi("changelogBody")){if(!e)return 0;if(!i||i.length===0)return e.innerHTML='<p class="clEmpty">No releases published yet.</p>',0;const n=i.map(s=>{const r=String(s.version)===String(t),o=String(s.notes??"").trim();return`
+      </table>`}}class o_{constructor(){this.ctx=null,this.master=null,this.muted=!1,this.started=!1}start(){if(this.started){this.ctx&&this.ctx.state==="suspended"&&this.ctx.resume();return}try{const t=window.AudioContext||window.webkitAudioContext;if(!t)return;const e=new t;this.ctx=e,this.started=!0;const n=e.createGain();n.gain.value=0,n.connect(e.destination),this.master=n;const r=e.createBuffer(2,e.sampleRate*6,e.sampleRate);for(let g=0;g<2;g++){const _=r.getChannelData(g);let m=0;for(let p=0;p<_.length;p++){const x=Math.random()*2-1;m=(m+.02*x)/1.02,_[p]=m*3.2}}const o=e.createBufferSource();o.buffer=r,o.loop=!0;const a=e.createBiquadFilter();a.type="lowpass",a.frequency.value=520,a.Q.value=.6;const l=e.createGain();l.gain.value=.5;const c=e.createOscillator();c.frequency.value=.07;const h=e.createGain();h.gain.value=.22,c.connect(h),h.connect(l.gain),c.start();const u=e.createOscillator();u.frequency.value=.045;const f=e.createGain();f.gain.value=260,u.connect(f),f.connect(a.frequency),u.start(),o.connect(a),a.connect(l),l.connect(n),o.start();const d=e.createGain();d.gain.value=.055,d.connect(n),[55,82.5,110].forEach((g,_)=>{const m=e.createOscillator();m.type="sine",m.frequency.value=g*(1+(_-1)*.002);const p=e.createGain();p.gain.value=_===0?1:.35,m.connect(p),p.connect(d),m.start()}),this.volume??(this.volume=.5),n.gain.setTargetAtTime(this.volume,e.currentTime,2)}catch(t){console.warn("Audio unavailable:",t)}}setMuted(t){this.muted=t,this._applyVolume(.15)}setVolume(t){this.volume=Math.max(0,Math.min(1,t)),this._applyVolume(.15)}_applyVolume(t){if(this.volume??(this.volume=.5),this.master&&this.ctx){const e=this.muted?0:this.volume;this.master.gain.setTargetAtTime(e,this.ctx.currentTime,t)}}toggle(){return this.setMuted(!this.muted),this.muted}}const zc="aetheris_releases",a_=2e4;function l_(i,t){const e=o=>String(o??"").trim().replace(/^v/i,"").split(".").map(a=>{const l=parseInt(a,10);return Number.isFinite(l)?l:0}),n=e(i),s=e(t),r=Math.max(n.length,s.length);for(let o=0;o<r;o++){const a=n[o]??0,l=s[o]??0;if(a!==l)return a-l}return 0}function Gc(i){i?.href;const t=i?.hostname??"",e=i?.port??"",n=t==="127.0.0.1"||t==="localhost"||t==="[::1]";return!i?.protocol?.startsWith("http")||!n||!e?null:{base:`${i.protocol}//${t}:${e}`,staged:`${i.protocol}//${t}:${e}/__aetheris/staged`}}async function Hc({url:i,anonKey:t,channel:e="stable",table:n=zc,timeoutMs:s=a_,fetchImpl:r=fetch}={}){if(!i||!t)throw new Error("supabase url and anon key are required");const o=`${i.replace(/\/+$/,"")}/rest/v1/${n}?select=version,channel,release_no,notes,released_at,size_bytes,sha256&channel=eq.${encodeURIComponent(e)}&published=eq.true&order=release_no.desc&limit=1`,a=new AbortController,l=setTimeout(()=>a.abort(),s);try{const c=await r(o,{headers:{apikey:t,Authorization:`Bearer ${t}`},signal:a.signal,cache:"no-store"});if(!c.ok)throw new Error(`release lookup failed (${c.status})`);const h=await c.json();if(!Array.isArray(h)||h.length===0)return null;const u=h[0];if(!u.version||!u.sha256)throw new Error("release row is incomplete");return{version:String(u.version),channel:String(u.channel??e),releaseNo:Number(u.release_no??0),notes:String(u.notes??""),releasedAt:String(u.released_at??""),sizeBytes:Number(u.size_bytes??0),sha256:String(u.sha256).toLowerCase()}}finally{clearTimeout(l)}}function c_({url:i,version:t,sha256:e,table:n=zc}){const s=i.replace(/\/+$/,"");return[`${s}/storage/v1/object/public/${n}/${encodeURIComponent(t)}.html`,`${s}/rest/v1/aetheris_release_payload?select=html&version=eq.${encodeURIComponent(t)}`].map(r=>({url:r,kind:r.includes("/storage/")?"binary":"json",version:t,sha256:e}))}async function h_(i,t=globalThis.crypto?.subtle){if(!t)throw new Error("SubtleCrypto is unavailable");const e=i instanceof Uint8Array?i:new Uint8Array(i),n=await t.digest("SHA-256",e);return Array.from(new Uint8Array(n)).map(s=>s.toString(16).padStart(2,"0")).join("")}async function u_(i,{url:t,anonKey:e,timeoutMs:n=6e4,fetchImpl:s=fetch,subtle:r}={}){const o={apikey:e,Authorization:`Bearer ${e}`},a=[];for(const l of c_({url:t,version:i.version,sha256:i.sha256})){const c=new AbortController,h=setTimeout(()=>c.abort(),n);try{const u=await s(l.url,{headers:l.kind==="json"?{...o,Accept:"application/json"}:o,signal:c.signal,cache:"no-store"});if(!u.ok){a.push(`${l.kind}: HTTP ${u.status}`);continue}let f;if(l.kind==="json"){const _=await u.json();if(f=Array.isArray(_)&&_.length?_[0].html:null,typeof f!="string"||!f){a.push("json: empty payload");continue}}else{const _=await u.arrayBuffer();f=new TextDecoder("utf-8",{fatal:!0}).decode(_)}const d=new TextEncoder().encode(f),g=await h_(d,r);if(g!==i.sha256){a.push(`${l.kind}: sha256 mismatch`);continue}if(!/<!doctype html/i.test(f.slice(0,200))){a.push(`${l.kind}: not an html document`);continue}return{html:f,bytes:d.length,sha256:g,transport:l.kind}}catch(u){a.push(`${l.kind}: ${u?.message??u}`)}finally{clearTimeout(h)}}throw new Error(`could not download ${i.version} (${a.join("; ")})`)}async function d_(i,t,{timeoutMs:e=3e4,fetchImpl:n=fetch}={}){const s=new AbortController,r=setTimeout(()=>s.abort(),e);try{const o=await n(i,{method:"POST",headers:{"Content-Type":"text/html; charset=utf-8"},body:t,signal:s.signal}),a=await o.text();if(!o.ok)throw new Error(`launcher refused the update (${o.status}) ${a.slice(0,80)}`);if(!/staged/i.test(a))throw new Error(`launcher did not stage the update (${a.slice(0,80)})`);return a}finally{clearTimeout(r)}}async function f_({currentVersion:i,location:t=globalThis.location,supabaseUrl:e,anonKey:n,channel:s="stable",onStatus:r=()=>{},...o}={}){const a=Gc(t);if(!a)return{state:"unsupported"};let l;try{r("checking"),l=await Hc({url:e,anonKey:n,channel:s,...o})}catch(c){return r("offline"),{state:"offline",error:c?.message??String(c)}}if(!l)return r("current"),{state:"current",latest:null};if(l_(l.version,i)<=0)return r("current"),{state:"current",latest:l};try{r("downloading",l);const c=await u_(l,{url:e,anonKey:n,...o});return await d_(a.staged,c.html,o),r("staged",l),{state:"staged",latest:l,bytes:c.bytes,transport:c.transport}}catch(c){return r("failed",l),{state:"failed",latest:l,error:c?.message??String(c)}}}function ca(i){const t=String(i??"").trim();return t?t.toLowerCase().startsWith("v")?t:`v${t}`:""}const p_=5e3;function m_({location:i=globalThis.location,fetchImpl:t=globalThis.fetch,intervalMs:e=p_,setIntervalImpl:n=globalThis.setInterval,clearIntervalImpl:s=globalThis.clearInterval}={}){const r=Gc(i);if(!r)return{stop(){},url:null};const o=`${r.base}/__aetheris/alive`;let a=null,l=!1;const c=()=>{if(!l)try{t?.(o,{cache:"no-store",keepalive:!0})?.catch?.(()=>{})}catch{}};c();try{a=n?.(c,e)??null}catch{a=null}return{url:o,stop(){if(l=!0,a!==null){try{s?.(a)}catch{}a=null}}}}const Fs=(()=>{try{return"1.5.3"}catch{return"0.0.0-dev"}})(),xi=i=>document.getElementById(i),g_={checking:"CHECKING FOR UPDATES",downloading:"DOWNLOADING A NEWER BUILD",staged:"UPDATE READY · RESTART TO PLAY IT",current:"",offline:"",failed:""};function ha(i){return String(i).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}function __(i){const t=new Date(i);return Number.isNaN(t.getTime())?"":t.toISOString().slice(0,10)}function v_(i,t,e=xi("changelogBody")){if(!e)return 0;if(!i||i.length===0)return e.innerHTML='<p class="clEmpty">No releases published yet.</p>',0;const n=i.map(s=>{const r=String(s.version)===String(t),o=String(s.notes??"").trim();return`
       <article class="clEntry${r?" current":""}">
         <div class="clHead">
           <span class="clVer">${ha(ca(s.version))}</span>
@@ -4910,300 +5206,5 @@ Suggested solution: ${t.workaround}`),new Error(e)}static isWebSocketSupported()
 Update your graphics driver, or run the game in Edge / Chrome with hardware acceleration on.`),i}Nt.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5)),Nt.setSize(window.innerWidth,window.innerHeight),Nt.outputColorSpace=Me,Nt.toneMapping=4,Nt.toneMappingExposure=1.05,Nt.shadowMap.enabled=!0,Nt.shadowMap.type=2,Nt.shadowMap.autoUpdate=!0;const ue=new _m;ue.fog=new Co(12376048,.001);const gn=new Qe(60,window.innerWidth/window.innerHeight,.1,_e.far),le=new Om(16777215,5.2);le.castShadow=!0;for(const i of[0,1,2,3,4])le.shadow.camera.layers.enable(i);le.shadow.mapSize.set(2048,2048),le.shadow.camera.near=1,le.shadow.camera.far=760,le.shadow.camera.left=-175,le.shadow.camera.right=175,le.shadow.camera.top=175,le.shadow.camera.bottom=-175,le.shadow.bias=-4e-4,le.shadow.normalBias=.035,le.shadow.radius=2.4,ue.add(le),ue.add(le.target);const yi=new Um(10335432,3881514,1.1);ue.add(yi),Kl(0),ue.fog.color.copy(wt.uFogColor.value),ue.fog.density=wt.uFogDensity.value,le.color.copy(wt.uSunColor.value),le.intensity=Ki[0].sunIntensity,yi.color.copy(wt.uAmbientSky.value),yi.groundColor.copy(wt.uAmbientGround.value),yi.intensity=Ki[0].hemiIntensity;const is=new Yt;ue.add(is);let ks,Xc,qc,fa,Os,Fn,Bs,Fr,kr;const S_=()=>new Promise(i=>requestAnimationFrame(()=>setTimeout(i,0)));async function M_(){const i=Bt("loadStatus"),t=Bt("loadBar"),e=async(n,s,r)=>{i.textContent=s,t.style.width=n+"%",await S_(),r()};await e(10,"Raising the sky",()=>{ks=Km(_e.far*.9),ue.add(ks)}),await e(28,"Sculpting the island",()=>{Xc=r0(),is.add(Xc)}),await e(46,"Flooding the ocean",()=>{qc=c0(),is.add(qc)}),await e(62,"Planting the forests",()=>{fa=d0(),is.add(fa.group),Bs=new eg(fa.colliders)}),await e(80,"Seeding the meadows",()=>{Fr=rc(),Fr.group.traverse(n=>n.layers&&n.layers.set(1)),is.add(Fr.group),kr=rc(),kr.group.traverse(n=>n.layers&&n.layers.set(3)),is.add(kr.group)}),await e(94,"Loading weapons",()=>{Os=f0(900,62),ue.add(Os),Fn=new v0(ue),Bs&&(Fn.world=Bs)}),await e(100,"Ready",()=>{})}const Kt={volume:.9,quality:"auto",rumble:!0,playerName:"",botDifficulty:"easy",padSensitivity:.75};try{const i=JSON.parse(localStorage.getItem("aetheris.settings")||"null");i&&typeof i=="object"&&Object.assign(Kt,i)}catch{}function ss(){try{localStorage.setItem("aetheris.settings",JSON.stringify(Kt))}catch{}}const $c={easy:[.05,.3],normal:[.28,.6],hard:[.55,.92]},A={mode:null,fighters:[],locals:[],bots:[],brains:[],pickups:null,paused:!0,running:!1,over:!1,spawnPoints:[],killLimit:15,timeLimit:0,cam1:null,cam2:null,input1:null,input2:null,menuT:0,match:null,spectate:[null,null],botCount:4,online:null,remoteInputs:new Map},rs=new o_;rs.volume=Kt.volume;const xe=new t_;xe.setMuted(!1);const ee=new r_(Bt("hudRoot"));function jc(){const i=new Qe(78,1,.03,_e.far);return i.rotation.order="YXZ",ue.add(i),i}function b_(i,t){return new Q0({mode:i,killLimit:i==="duo"||i==="online"?t:0,timeLimit:i==="duo"||i==="online"?420:0})}function Yc(){for(const i of A.fighters)ue.remove(i.bodyAnchor),i.camera&&ue.remove(i.camera);A.fighters=[],A.locals=[],A.bots=[],A.brains=[],A.spectate=[null,null],A.pickups&&(ue.remove(A.pickups.group),A.pickups=null),A.input1&&(A.input1.enabled=!1),A.input2&&(A.input2.enabled=!1),A.cam1=null,A.cam2=null,A.input1=null,A.input2=null,A.match=null,A.remoteInputs=new Map,A.ping=null,Fn&&Fn.clear?.(),ee.destroy()}let bn=null;const Or=3;function Kc(i,t){const e=A.match;i.onShot=(n,s)=>{if(e&&e.shot(i),xe.shot(n.kind,s,i.isLocal),i.isLocal&&(i.flashTimer=Math.max(i.flashTimer,.04),i.inputSource==="pad"&&Kt.rumble)){const r=n.kind==="shotgun"||n.kind==="sniper"?.85:.42;A.input2?.rumble(r,70,.3)}},i.onEmpty=()=>xe.emptyClick(),i.onReloadStart=n=>{i.isLocal&&xe.reloadStart(n.kind)},i.onReloadEnd=()=>{i.isLocal&&xe.reloadEnd()},i.onHeal=()=>{i.isLocal&&xe.heal()},i.onSwap=()=>{i.isLocal&&xe.reloadStart("pistol")},i.onHit=(n,s)=>{t>=0&&t<A.locals.length&&(ee.flashHit(t,s),xe.hit(s),xe.flesh())},i.onDamage=(n,s,r)=>{e&&s&&e.hit(s,r,n),t>=0&&t<A.locals.length&&(ee.flashDamage(t),xe.hurt(),i.lastHitAngle!==void 0&&ee.showDamageDirection(t,i.lastHitAngle),i.inputSource==="pad"&&Kt.rumble&&A.input2?.rumble(.7,160,.5))},i.onDeath=n=>{const s=A.mode==="online"&&A.online&&!A.online.isHost,r=e&&!s?e.kill(n,i):null;A.pickups&&i.slots[i.slot]&&A.pickups.dropFrom(i);const o=A.locals.includes(i),a=n&&A.locals.includes(n)?"#7ef7e4":"#ffb0a0",l=n&&n!==i?`${n.name} ⟶ ${i.name}${r?.headshot?" ☠":""}`:`${i.name} ELIMINATED`;if(ee.addFeed(l,a),o&&(xe.death(),i.inputSource==="pad"&&Kt.rumble&&A.input2?.rumble(1,400,.8)),n&&A.locals.includes(n)){const c=A.locals.indexOf(n);r?.milestone&&(ee.showStreak(c,r.milestone),xe.streak(r.streak)),r?.revenge&&ee.toast(c,"REVENGE")}r?.over&&Br()}}function os(i,t=4,e=15){Yc(),A.mode=i,A.over=!1,A.paused=!1,A.running=!0,A.botCount=t,A.killLimit=e,A.match=b_(i,e),A.spawnPoints=e_(i==="duo"?16:14);const n=i==="online"&&A.online?A.online.seed>>>0:0,s=n_(i==="duo"||i==="online"?30:24,i==="duo"||i==="online"?20:24,n);A.pickups=new j0(ue,s,n),A.pickups.onCollect=(c,h)=>{const u=A.locals.indexOf(c);if(u>=0){const f=h==="medkit"?"MEDKIT +1":h==="ammo"?"AMMO RESUPPLY":h==="armor"?"BODY ARMOR":`${mn[h]?.short||h.toUpperCase()} EQUIPPED`;ee.toast(u,f),xe.pickup(h)}};const r=i==="online"&&!!A.online;if(A.cam1=jc(),A.cam1.layers.enable(1),A.cam1.layers.enable(2),!r){const c=new Is({id:"p1",name:"PLAYER 1",scene:ue,camera:A.cam1,bodyLayer:4,viewLayer:1,palette:"p1",spawnPoints:A.spawnPoints});c.inputSource="kbm",c.aimAssist=!1,c.assistFromPad=!0,A.fighters.push(c),A.locals.push(c)}if(i==="duo"){A.cam2=jc(),A.cam2.layers.enable(3),A.cam2.layers.enable(4);const c=new Is({id:"p2",name:"PLAYER 2",scene:ue,camera:A.cam2,bodyLayer:2,viewLayer:3,palette:"p2",spawnPoints:A.spawnPoints}),h=new Jn(1,{lookSpeed:Or*Math.max(.2,Math.min(2,Kt.padSensitivity??.75))}).bindToIndex(1);h.connected?(A.input2=h,c.inputSource="pad"):(A.input2=new K0,c.inputSource="keys2",ee.toast(0,"P2: NO CONTROLLER — IJKL + ARROWS")),c.aimAssist=c.inputSource==="pad",A.input2.enabled=!0,A.fighters.push(c),A.locals.push(c)}if(i==="online"&&A.online){const c=A.online;c.localId=c.id,c.localName=c.net.name||"YOU";const h=new Is({id:c.id,name:c.localName,scene:ue,camera:A.cam1,bodyLayer:4,viewLayer:1,palette:"p1",spawnPoints:A.spawnPoints});h.inputSource="kbm",h.isOnlineLocal=!0,h.assistFromPad=!0,h.aimAssist=!1,A.fighters.push(h),A.locals.push(h),c.localFighter=h;const u=c.players.find(R=>R.id!==c.id),f=new Is({id:u?.id||"peer",name:u?.name||"OPPONENT",scene:ue,bodyLayer:2,palette:"p2",spawnPoints:A.spawnPoints});f.inputSource="remote",f.isOnlineRemote=!0,A.fighters.push(f),c.remoteFighter=f;const d=A.spawnPoints,g=d[0],_=d[Math.min(1,d.length-1)],m=g.position,p=_.position,x=c.isHost,y=x?m:p,S=x?p:m;h.spawnAt(y,Math.atan2(-(S.x-y.x),-(S.z-y.z))),f.spawnAt(S,Math.atan2(-(y.x-S.x),-(y.z-S.z))),h.spawnProtect=2.5,f.spawnProtect=2.5,A.remoteInputs.clear(),c.handlers.onRemoteInput=(R,w)=>{A.remoteInputs.set(R,w)},c.handlers.onPeerLeft=()=>{if(A.running&&A.mode==="online"){ga("OPPONENT LEFT");return}ut.lastLobby&&Si(ut.lastLobby)},c.handlers.onRemoteOver=()=>{if(A.running&&A.mode==="online"&&!A.over){const R=A.match;R&&(R.remaining=0,R.over=!0,R.reason=R.reason||"kills"),Br()}}}const o=new Y0(da);bn=new Jn(0,{lookSpeed:Or*Math.max(.2,Math.min(2,Kt.padSensitivity??.75))}),i==="duo"&&bn.bindToIndex(0),A.input1=new J0(o,bn),A.input1.enabled=!0,A.input1.onLockLost=()=>{A.input1.lookMode==="lock"&&A.running&&!A.over&&!bn?.connected&&zr()},A.input1.onFallbackMode=()=>ee.toast(0,"HOLD LEFT MOUSE TO LOOK"),A.input1.onLockRefused=()=>{!A.running||A.over||(zr(),ee.toast(0,"CLICK TO RESUME"))},A.outlines=[];const a=[2,4];for(let c=0;c<A.locals.length;c++){const h=new ng;h.setTarget(null,a[c]??2),ue.add(h.group),A.outlines.push(h)}if(i==="online"&&A.online&&ee.setPing(A.online.ping||0),i==="solo"){const c=["VIPER","RAVEN","GHOST","HAVOC","ONYX","JACKAL","SPECTRE","TALON"];for(let h=0;h<t;h++){const u=new Is({id:`bot${h}`,name:c[h%c.length],scene:ue,isBot:!0,bodyLayer:0,palette:h%2===0?"botA":"botB",spawnPoints:A.spawnPoints,respawnDelay:4});A.fighters.push(u),A.bots.push(u);const[f,d]=$c[Kt.botDifficulty]||$c.easy;A.brains.push(new B0(u,A.spawnPoints,f+h/Math.max(1,t)*(d-f)))}}const l=[...A.spawnPoints].sort(()=>Math.random()-.5);A.fighters.forEach((c,h)=>{const u=l[h%l.length];c.spawnAt(u.position,u.yaw)}),A.match?.reset(),A.fighters.forEach(c=>A.match.stat(c)),ee.createPanes(A.locals.length),ee.setNames(A.locals.map(c=>c.name)),ee.setClock(A.match?.clock??"∞"),A.locals.forEach((c,h)=>{Kc(c,h),c.onRespawn=()=>{A.spectate[h]=null,xe.spawn()}}),A.bots.forEach(c=>Kc(c,-1)),rs.start(),rs.ctx&&xe.attach(rs.ctx),xe.setListeners([A.cam1,A.cam2]),xe.setMuted(Kt.volume<=0),xe.volume=Kt.volume,Bt("menu").classList.remove("show"),Bt("pause").classList.remove("show"),Bt("victory").classList.remove("show"),ee.root.classList.add("show"),document.body.classList.add("playing"),A.input1.requestLock(),Gr.getDelta()}function E_(i,t){return i.reason==="time"?t?"TIME UP · HIGHEST SCORE WINS":"TIME UP · DRAW":i.reason==="eliminated"?"YOU WERE ELIMINATED":t?`${i.killLimit} ELIMINATIONS`:""}function Br(){const i=A.match;if(!i||A.over)return;A.over=!0,ee.setPing(null),A.paused=!0,document.pointerLockElement&&document.exitPointerLock();const t=i.resolveTimeoutWinner(A.fighters);A.input1&&(A.input1.enabled=!1),A.input2&&(A.input2.enabled=!1),document.body.classList.remove("playing"),A.mode==="online"&&A.online&&A.online.net.broadcast({t:"over",winner:t?.id||null});const e=i.results(A.fighters).map(o=>({name:o.name,values:[o.kills,o.deaths,`${Math.round(o.accuracy*100)}%`,o.damage,o.headshots,o.bestStreak],me:A.locals.includes(o.fighter)}));let n;if(A.mode==="duo")n=t?`${t.name} WINS`:"DRAW";else if(A.mode==="online"){const o=t&&A.online&&t.id===A.online.id;n=t?o?"YOU WIN":`${t.name} WINS`:"DRAW"}else{const o=i.results(A.fighters).find(a=>!a.fighter.isBot);n=t&&t.isBot?`${t.name} WINS`:"RUN OVER",o&&(n+=` · ${o.kills} KILLS`)}const s=`${E_(i,t)}${A.mode==="solo"?`  ·  ${e[0]?.values[0]??0} KILLS`:""}`,r=Bt("victoryBody");r.innerHTML=ee.renderEndcard(n,s,["K","D","ACC","DMG","HS","STREAK"],e.slice(0,A.mode==="duo"||A.mode==="online"?2:8)),Bt("victory").classList.add("show"),xe.announce("victory")}const ut={el:null,session:null,busy:!1,started:!1};function qt(i){return document.getElementById(i)}function T_(){ut.el=qt("room"),ut.el.classList.add("show"),Bt("menu").classList.remove("show"),qt("playerName").value=Kt.playerName||"",qt("roomChooser").style.display="",qt("roomLobby").classList.remove("show"),je(""),Qn()}function Jc(){ut.session&&(ut.session.leave(),ut.session=null),ut.started=!1,ut.el&&ut.el.classList.remove("show"),Bt("menu").classList.add("show")}function je(i){const t=qt("roomError");t&&(t.textContent=i||""),t?.classList.remove("note")}function w_(i){const t=qt("roomError");t&&(t.textContent=i,t.classList.toggle("note",!!i))}function A_(){je("")}function C_(i){if(!i)return!1;try{if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(i).then(()=>{},()=>Zc(i)),!0}catch{}return Zc(i)}function Zc(i){try{const t=document.createElement("textarea");t.value=i,t.setAttribute("readonly",""),t.style.position="fixed",t.style.top="-1000px",t.style.opacity="0",document.body.appendChild(t),t.select();const e=document.execCommand&&document.execCommand("copy");return t.remove(),!!e}catch{return!1}}function R_(){const i=qt("roomCodeValue");if(!(!i||!window.getSelection))try{const t=document.createRange();t.selectNodeContents(i);const e=window.getSelection();e.removeAllRanges(),e.addRange(t)}catch{}}function Qn(){const t=(qt("playerName")?.value||"").trim().length>0,e=qt("btnHost"),n=qt("btnJoin");e&&(e.disabled=ut.busy||!t),n&&(n.disabled=ut.busy||!t||(qt("roomCode").value||"").trim().length<4)}function Qc(){const i=((qt("playerName")?.value||"").trim()||"PLAYER").toUpperCase().slice(0,14);return Kt.playerName=i,ss(),i}function Si(i){const t=qt("roomLobby"),e=qt("roomCodeValue"),n=qt("roomRoster"),s=qt("btnStartOnline"),r=qt("roomHint");if(!t)return;qt("roomChooser").style.display="none",t.classList.add("show"),e.textContent=i.code||ut.code||"-----";const o=ut.connectedIds||null;n.innerHTML="";for(const c of i.players||[]){const h=document.createElement("li"),u=!o||o.includes(c.id);u||h.classList.add("offline");const f=document.createElement("span");f.textContent=c.name||(c.id===ut.session?.id?"YOU":"PLAYER");const d=document.createElement("span");d.className="tag",d.textContent=c.isHost?"HOST":u?"CONNECTED":"LEFT",h.appendChild(f),h.appendChild(d),n.appendChild(h)}const a=(i.players||[]).length,l=ut.session?.isHost;s&&(s.style.display=l?"":"none",s.disabled=a<2||ut.busy,s.textContent=a<2?"WAITING FOR PLAYERS":ut.started?"STARTING…":"START MATCH",ut.started&&(s.disabled=!0)),r&&(r.textContent=ut.started?"Starting — loading the island…":l?a<2?"Share the code. Waiting for your friend to join.":"Your friend is in. Start when ready.":"Waiting for the host to start the match."),th()}function th(){const i=qt("roomPingLine"),t=qt("roomLatencyHint");if(!i||!ut.session)return;const e=ut.session.ping||0;if(!e){i.textContent="PING —",i.className="",t&&(t.textContent="");return}i.textContent=`PING ${Math.round(e)} ms`,i.className=e<80?"good":e<160?"ok":"bad",t&&(t.textContent=e<80?"GOOD CONNECTION":e<160?"PLAYABLE":"HIGH LATENCY")}async function eh(){if(!ut.busy){ut.busy=!0,je(""),Qn();try{const i=new aa({onLobby:n=>{ut.lastLobby=n,ut.started||Si(n)},onStatus:n=>{n.type==="presence"&&(ut.connectedIds=n.ids,ut.lastLobby&&Si(ut.lastLobby)),n.type==="room-gone"&&(je("THE HOST LEFT — ROOM CLOSED"),ut.started&&ga("HOST LEFT")),n.type==="subscribed"&&je(""),n.type==="reconnecting"&&je("CONNECTING TO THE SERVER…"),n.type==="connect-failed"&&je("CANNOT REACH THE SERVER — CHECK YOUR CONNECTION OR FIREWALL"),n.type==="reconnecting"&&je("CONNECTING TO THE SERVER…"),n.type==="connect-failed"&&je("CANNOT REACH THE SERVER — CHECK YOUR CONNECTION OR FIREWALL")}});ut.session=i,ut.connectedIds=null;const t=parseInt(qt("roomKills").value,10)||15;i.killLimit=t;const e=await i.host(Qc(),{killLimit:t,seed:0});Si(e)}catch(i){je(ma(i)),ut.session=null}finally{ut.busy=!1,Qn()}}}async function pa(){if(!ut.busy){ut.busy=!0,je(""),Qn();try{const i=(qt("roomCode").value||"").trim().toUpperCase();if(i.length<4)throw new Error("ROOM CODE TOO SHORT");const t=new aa({onLobby:n=>{ut.started||(ut.lastLobby=n,Si(n))},onStatus:n=>{n.type==="presence"&&(ut.connectedIds=n.ids,ut.lastLobby&&Si(ut.lastLobby)),n.type==="room-gone"&&(je("THE HOST LEFT — ROOM CLOSED"),ut.started?ga("HOST LEFT"):Jc())},onStart:()=>{ut.session===t&&(ut.started=!0,nh())}});ut.session=t;const e=await t.join(i,Qc());if(!e)throw new Error("ROOM NOT FOUND");if(e.status==="live")throw new Error("THAT MATCH IS ALREADY RUNNING");Si(e),ut.connectedIds=null}catch(i){je(ma(i)),ut.session=null}finally{ut.busy=!1,Qn()}}}function ma(i){const t=String(i?.message||i||"SOMETHING WENT WRONG");return/ROOM NOT FOUND/i.test(t)?"NO ROOM WITH THAT CODE":/FAILED TO FETCH|NETWORKERROR/i.test(t)?"CANNOT REACH THE SERVER — CHECK YOUR CONNECTION":t.toUpperCase().slice(0,90)}async function P_(){if(!(!ut.session||!ut.session.isHost||ut.busy)){ut.busy=!0,ut.started=!0,Qn();try{await ut.session.start(Math.floor(Math.random()*2**31)),nh()}catch(i){ut.started=!1,ut.busy=!1,je(ma(i))}}}function nh(){ut.session&&(ut.el?.classList.remove("show"),os("online",0,ut.session.killLimit||15))}function ga(i){A.running=!1,zs(),ee.toast(0,i||"MATCH OVER")}function L_(){const i=A.online;if(A.online=null,A.remoteInputs?.clear?.(),!!i){try{i.leave?.()}catch{}ut.session=null,ut.started=!1,ut.connectedIds=null,ut.lastLobby=null,ut.el?.classList.remove("show")}}function zr(){A.over||(A.paused=!0,Bt("pause").classList.add("show"),document.body.classList.remove("playing"),A.input1&&(A.input1.enabled=!1),A.input2&&(A.input2.enabled=!1))}function _a(){A.over||(A.paused=!1,Bt("pause").classList.remove("show"),document.body.classList.add("playing"),A.input1&&(A.input1.enabled=!0),A.input2&&(A.input2.enabled=!0),A.input1&&A.input1.requestLock(),Gr.getDelta())}function zs(){A.running=!1,A.paused=!0,A.over=!1,A.mode==="online"&&A.online&&L_(),k_(),Yc(),ee.root.classList.remove("show"),document.body.classList.remove("playing"),Bt("pause").classList.remove("show"),Bt("victory").classList.remove("show"),Bt("menu").classList.add("show"),document.pointerLockElement&&document.exitPointerLock(),Vs()}const Gr=new Bm;let as=0,va=0;const ih={high:1.5,balanced:1,low:.7,auto:1.5},Hr=[1.5,1.15,.9,.75,.6];let ti=0,Gs=0,Hs=0;function sh(){const i=ih[Kt.quality]??1.5;ti=0;const t=Math.min(window.devicePixelRatio||1,i);Nt.setPixelRatio(t),Nt.setSize(window.innerWidth,window.innerHeight),Gs=0,Hs=0}function rh(){return{fighters:A.fighters,effects:Fn,pickups:A.pickups}}function D_(i){const t=A.online,e=rh();A.match?.update(i);const n=t.localFighter,s=t.remoteFighter;if(t.isHost){if(n.alive){const o=oh(n);n.update(i,o,e)}else n.update(i,Vr(),e);if(s.alive){const o=A.remoteInputs.get(s.id);o?(t.lastGuestAck=o.seq,s.update(i,aa.unpackInput(o.i),e)):s.update(i,Vr(),e)}else s.update(i,Vr(),e);ah(),A.pickups.update(i,A.fighters),Fn.update(i),t.hostTick(i,A.fighters)}else{if(n.alive){const l=oh(n);t.clientInput(l,i),n.update(i,l,e)}else n.update(i,Vr(),e);const o=t.selfState;if(o){o.health<n.health-.01&&(n.hitFlash=1,n.regenDelay=mc,n.regenT=0,ee.flashDamage(0));const c=n.alive;n.health=o.health,n.armor=o.armor,n.alive=o.alive,n.kills=o.kills,n.deaths=o.deaths,c&&!n.alive&&n.onDeath?.(null),!c&&n.alive&&n.onRespawn?.()}const a=t.sampledState(s.id);a&&(t.applyRemote(s,a),s.stopMotion?.()),s.updateVisualOnly?.(i),A.pickups.update(i,[n]),Fn.update(i)}const r=t.ping||0;ee.setPing(r),A.ping=r,t.stale&&(t.staleNoticed=!0,ee.toast(0,"CONNECTION LOST — WAITING"))}function oh(i){i.assistFromPad&&(i.aimAssist=!!bn?.connected&&!A.input1.mouseActive?.(1200));const t=A.input1.poll(1/60);if(i.weapon.kind==="sniper"&&i.aimT>.5){const e=1-i.aimT*.72;t.lookX*=e,t.lookY*=e}return t}function Vr(){return{forward:0,strafe:0,lookX:0,lookY:0,jump:!1,sprint:!1,crouch:!1,fire:!1,aim:!1,reload:!1,swap:!1,slot:0,med:!1}}function ah(){for(let i=0;i<A.fighters.length;i++)for(let t=i+1;t<A.fighters.length;t++){const e=A.fighters[i],n=A.fighters[t];if(!e.alive||!n.alive)continue;const s=n.position.x-e.position.x,r=n.position.z-e.position.z,o=Math.hypot(s,r);if(o>.001&&o<.72){const a=(.72-o)*.5;e.position.x-=s/o*a,e.position.z-=r/o*a,n.position.x+=s/o*a,n.position.z+=r/o*a}}}function I_(i){if(A.mode==="online"&&A.online)return D_(i);const t=rh();A.match?.update(i);for(let e=0;e<A.locals.length;e++){const n=A.locals[e];if(!n.alive){N_(e,i),n.update(i,{forward:0,strafe:0,lookX:0,lookY:0,jump:!1,sprint:!1,crouch:!1,fire:!1,aim:!1,reload:!1,swap:!1,slot:0,med:!1},t);continue}A.spectate[e]=null;const s=e===0?A.input1.poll(i):A.input2.poll(i);if(n.assistFromPad){const r=!!bn?.connected&&!A.input1.mouseActive?.(1200);n.aimAssist=r}if(n.weapon.kind==="sniper"&&n.aimT>.5){const r=1-n.aimT*.72;s.lookX*=r,s.lookY*=r}n.update(i,s,t)}for(let e=0;e<A.bots.length;e++){const n=A.bots[e],s=A.brains[e].update(i,t);n.update(i,s,t)}if(ah(),A.pickups.update(i,A.fighters),Fn.update(i),Fr.rebuild(A.locals[0].position.x,A.locals[0].position.z),A.locals[1]&&kr.rebuild(A.locals[1].position.x,A.locals[1].position.z),A.match&&!A.over){const e=A.match;ee.setClock(e.clock),ee.setClockWarning(e.timeLimit>0&&e.remaining<30),e.over&&Br()}}function N_(i,t){const e=i===0?A.cam1:A.cam2;if(!e)return;if(!A.spectate[i]){const r=A.fighters.filter(o=>o.alive&&o!==A.locals[i]);A.spectate[i]={target:r[0]||null,t:0,orbit:Math.random()*Math.PI*2}}const n=A.spectate[i];n.t+=t;const s=n.target&&n.target.alive?n.target:null;if(s){const r=Math.sin(n.t*.3)*.4;e.position.set(s.position.x+Math.sin(n.orbit+n.t*.15)*6,s.position.y+3.2+r,s.position.z+Math.cos(n.orbit+n.t*.15)*6),e.lookAt(s.position.x,s.position.y+1.4,s.position.z)}}function U_(){if(!A.outlines)return;const i=[2,4];for(let t=0;t<A.locals.length;t++){const e=A.outlines[t],n=A.locals[t],s=n.alive?n.onTarget:null;e.setTarget(s,i[t]??2),e.sync()}}function F_(i){if(!(!A.running&&!A.over)){for(let t=0;t<A.locals.length;t++){const e=t===0?A.cam1:A.cam2;ee.update(i,t,A.locals[t],A.fighters,A.pickups,e)}for(let t=0;t<A.locals.length;t++)t===1&&A.input2&&A.input2 instanceof Jn&&!A.input2.connected&&ee.setSpectating(1,!0)}}function k_(){Nt.setScissorTest(!1),Nt.setViewport(0,0,window.innerWidth,window.innerHeight),Nt.setScissor(0,0,window.innerWidth,window.innerHeight),Nt.setPixelRatio(Math.min(window.devicePixelRatio||1,ih[Kt.quality]??1.5)),Nt.setSize(window.innerWidth,window.innerHeight)}function lh(i,t,e,n,s){Nt.setViewport(t,e,n,s),Nt.setScissor(t,e,n,s),Nt.setScissorTest(!0),i.aspect=n/s,i.updateProjectionMatrix(),ks.position.copy(i.position),Os.position.copy(i.position),Nt.render(ue,i)}function O_(){const i=window.innerWidth,t=window.innerHeight;if(!A.running){const c=2.1+A.menuT*.03;gn.aspect=i/t,gn.position.set(Math.cos(c)*660,235,Math.sin(c)*660),gn.lookAt(0,45,0),gn.updateProjectionMatrix(),ks.position.copy(gn.position),Os.position.copy(gn.position),le.position.copy(gn.position).addScaledVector(wt.uSunDir.value,300),le.target.position.copy(gn.position),le.target.updateMatrixWorld(),le.shadow.needsUpdate=!0,Nt.setViewport(0,0,i,t),Nt.setScissor(0,0,i,t),Nt.setScissorTest(!0),Nt.render(ue,gn);return}const e=A.locals[0],n=A.locals[1],s=n?(e.position.x+n.position.x)*.5:e.position.x,r=n?(e.position.y+n.position.y)*.5:e.position.y,o=n?(e.position.z+n.position.z)*.5:e.position.z;le.target.position.set(s,r,o),le.target.updateMatrixWorld(),le.position.set(s,r,o).addScaledVector(wt.uSunDir.value,320),le.shadow.needsUpdate=!0;const a=Math.floor(i/2);A.mode==="duo"&&A.cam2?xa(A.locals[0])&&!xa(A.locals[1])?(lh(A.cam2,a,0,i-a,t),Wr(A.cam1,A.locals[0],0,0,a,t)):(Wr(A.cam1,A.locals[0],0,0,a,t),Wr(A.cam2,A.locals[1],a,0,i-a,t)):Wr(A.cam1,A.locals[0],0,0,i,t)}function xa(i){return!!(i&&i.weapon?.kind==="sniper"&&i.aimT>.82)}function Wr(i,t,e,n,s,r){if(!xa(t)){lh(i,e,n,s,r);return}const a=Math.min(r*64/100,s*.88),l=Math.min(3,s/a),c=we.radToDeg(2*Math.atan(Math.tan(we.degToRad(t.adsFov)/2)/l)),h=Nt.getPixelRatio(),u=i.fov;i.fov=c,i.aspect=s/r,i.updateProjectionMatrix(),ks.position.copy(i.position),Os.position.copy(i.position),Nt.setScissorTest(!0),Nt.setScissor(Math.round((e+s/2-a/2)*h),Math.round((n+r/2-a/2)*h),Math.round(a*h),Math.round(a*h)),Nt.setViewport(Math.round((e+s/2-a/2)*h),Math.round((n+r/2-a/2)*h),Math.round(a*h),Math.round(a*h)),Nt.clearDepth(),Nt.render(ue,i),i.fov=u,i.updateProjectionMatrix();const f=Math.round(e*h),d=Math.round(n*h),g=Math.round(s*h),_=Math.round(r*h);Nt.setScissor(f,d,g,_),Nt.setViewport(f,d,g,_);const m=Nt.getContext();m.enable(m.SCISSOR_TEST),m.clearColor(0,0,0,1),m.clear(m.COLOR_BUFFER_BIT),Nt.setScissorTest(!1)}function ch(){requestAnimationFrame(ch);const i=Math.min(Gr.getDelta(),.05);if(wt.uTime.value+=i,A.menuT+=i,A.running&&!A.paused&&!A.over&&I_(i),A.running&&!A.over&&U_(),O_(),F_(i),as+=i,va++,as>.5){const t=Math.round(va/as),e=Bt("fps");e&&(e.textContent=`${t} FPS  ·  ${A.running?A.mode==="duo"?"SPLIT":"SOLO":"MENU"}`),Kt.quality==="auto"&&A.running&&t<46&&ti<Hr.length-1?(Gs+=as,Gs>2.5&&(ti++,Nt.setPixelRatio(Math.min(window.devicePixelRatio||1,Hr[ti])),Nt.setSize(window.innerWidth,window.innerHeight),Gs=0,console.log(`[quality] render scale → ${Hr[ti]}`))):Kt.quality==="auto"&&A.running&&t>=56?(Hs+=as,Hs>6&&ti>0&&(ti--,Nt.setPixelRatio(Math.min(window.devicePixelRatio||1,Hr[ti])),Nt.setSize(window.innerWidth,window.innerHeight),Hs=0)):(Gs=0,Hs=0),as=0,va=0}}function B_(){const i=Er.preset;le.color.copy(wt.uSunColor.value),le.intensity=i.sunIntensity,yi.color.copy(wt.uAmbientSky.value),yi.groundColor.copy(wt.uAmbientGround.value),yi.intensity=i.hemiIntensity,ue.fog.color.copy(wt.uFogColor.value),ue.fog.density=wt.uFogDensity.value,Nt.toneMappingExposure=i.exposure}window.addEventListener("keydown",i=>{if(i.code==="KeyT"&&!i.repeat&&(Kl(Er.presetIndex+1),B_()),i.code==="KeyM"&&!i.repeat){const t=rs.toggle();xe.setMuted(t),ee.toast(0,t?"SOUND OFF":"SOUND ON"),A.locals[1]&&A.mode==="duo"&&ee.toast(1,t?"SOUND OFF":"SOUND ON")}i.code==="Escape"&&(A.over?zs():A.running&&!A.paused?(zr(),document.pointerLockElement&&document.exitPointerLock()):A.running&&A.paused&&_a()),A.over&&(i.code==="Enter"||i.code==="NumpadEnter")&&os(A.mode,A.botCount,A.killLimit)}),Bt("btnSolo").addEventListener("click",i=>{if(i.stopPropagation(),i.target.tagName==="SELECT"||i.target.tagName==="OPTION")return;const t=parseInt(Bt("botCount").value,10)||4;os("solo",t)}),Bt("btnDuo").addEventListener("click",i=>{if(i.stopPropagation(),i.target.tagName==="SELECT"||i.target.tagName==="OPTION")return;const t=parseInt(Bt("killLimit").value,10)||15;os("duo",0,t)}),Bt("btnOnline").addEventListener("click",i=>{i.stopPropagation(),!(i.target.tagName==="SELECT"||i.target.tagName==="OPTION")&&T_()});{const i=qt("playerName");i&&(i.addEventListener("input",Qn),i.addEventListener("keydown",e=>{e.key==="Enter"&&(e.preventDefault(),qt("roomCode").value.length>0?pa():eh()),e.stopPropagation()}));const t=qt("roomCode");t&&(t.addEventListener("input",()=>{t.value=t.value.toUpperCase().replace(/[^A-Z0-9]/g,""),Qn()}),t.addEventListener("keydown",e=>{e.key==="Enter"&&(e.preventDefault(),pa()),e.stopPropagation()})),qt("btnHost")?.addEventListener("click",eh),qt("btnJoin")?.addEventListener("click",pa),qt("btnStartOnline")?.addEventListener("click",P_),qt("btnRoomBack")?.addEventListener("click",Jc),qt("btnCopyCode")?.addEventListener("click",async()=>{const e=qt("btnCopyCode"),n=qt("roomCodeValue")?.textContent||"";if(A_(),C_(n)){e.textContent="COPIED",setTimeout(()=>{e.textContent="COPY"},1400);return}R_(),e.textContent="SELECTED",setTimeout(()=>{e.textContent="COPY"},1400),w_("Press Ctrl+C to copy the code")})}Bt("pause").addEventListener("click",i=>{i.target.closest("#pauseGrid")||_a()}),Bt("btnQuit").addEventListener("click",i=>{i.stopPropagation(),zs()}),Bt("btnRematch").addEventListener("click",i=>{i.stopPropagation(),os(A.mode,A.botCount,A.killLimit)}),Bt("btnVictoryMenu").addEventListener("click",i=>{i.stopPropagation(),zs()}),Bt("optVolume").addEventListener("input",i=>{Kt.volume=parseInt(i.target.value,10)/100,rs.setVolume(Kt.volume),xe.volume=Kt.volume,xe.setMuted(Kt.volume<=.001),ss()}),Bt("optQuality").addEventListener("change",i=>{Kt.quality=i.target.value,sh(),ss()}),Bt("optRumble").addEventListener("change",i=>{Kt.rumble=i.target.value==="on",ss()}),Bt("optDifficulty").addEventListener("change",i=>{Kt.botDifficulty=i.target.value,ss()}),Bt("optPadSens").addEventListener("input",i=>{Kt.padSensitivity=Number(i.target.value)/100,hh(),ss()});function hh(){const i=Math.max(.2,Math.min(2,Kt.padSensitivity??.75));try{bn&&(bn.lookSpeed=Or*i),A.input2?.pad&&(A.input2.pad.lookSpeed=Or*i)}catch{}}Bt("optVolume").value=String(Math.round(Kt.volume*100)),Bt("optQuality").value=Kt.quality,Bt("optRumble").value=Kt.rumble?"on":"off",Bt("optDifficulty").value=Kt.botDifficulty||"easy",Bt("optPadSens").value=String(Math.round((Kt.padSensitivity??.75)*100)),hh(),da.addEventListener("click",()=>{A.running&&!A.paused&&A.input1&&!A.input1.locked&&A.input1.requestLock()});function Vs(){const i=Bt("padStatus");if(!i)return;let t=0;try{const n=navigator.getGamepads?navigator.getGamepads():null;if(n)for(const s of n)s&&s.connected&&t++}catch{}const e=t>0||!!bn?.connected||!!A.input2?.connected;i.textContent=e?"CONTROLLER DETECTED — PLAYER 1 OR 2":"NO CONTROLLER — USE THE KEYBOARD, OR PRESS A PAD BUTTON",i.classList.toggle("ok",e)}setInterval(Vs,250),setInterval(()=>{ut.el?.classList.contains("show")&&th()},400),window.addEventListener("gamepadconnected",()=>{Vs()}),window.addEventListener("gamepaddisconnected",()=>{A.input1?.forgetPad?.(),bn?.forgetPad?.(),Vs()}),window.addEventListener("resize",()=>{Nt.setSize(window.innerWidth,window.innerHeight),gn.aspect=window.innerWidth/window.innerHeight,gn.updateProjectionMatrix()});try{new URLSearchParams(window.location.search).has("debug")&&(window.__aetheris={game:A,hud:ee,effects:Fn,startMatch:os,endMatch:Br,pauseGame:zr,resumeGame:_a,quitToMenu:zs,get match(){return A.match},__menu:()=>({version:uh?.version??Fs,label:ca(uh?.version??Fs)}),__inspect:()=>({shadowAutoUpdate:Nt.shadowMap.autoUpdate,shadowLayers:[0,1,2,3,4].filter(i=>le.shadow.camera.layers.isEnabled(i)),shadowEnabled:Nt.shadowMap.enabled,colliders:Bs?Bs.items.length:0})})}catch{}window.__aetherisBooted=!0,m_();const uh=x_({version:Fs,fetchReleases:()=>Hc({url:es,anonKey:Un}).then(i=>i?[i]:[]).then(i=>z_(i)),onCheck:({setStatus:i})=>{f_({currentVersion:Fs,supabaseUrl:es,anonKey:Un,onStatus:t=>i(t)}).then(t=>{t?.state==="staged"&&console.info(`[update] ${t.latest.version} staged for next launch`)}).catch(()=>i("offline"))}});async function z_(i){try{const t=await fetch(`${es}/rest/v1/aetheris_releases?select=version,notes,released_at,release_no&published=eq.true&order=release_no.desc&limit=25`,{headers:{apikey:Un,Authorization:`Bearer ${Un}`},cache:"no-store"});if(!t.ok)throw new Error(`HTTP ${t.status}`);const e=await t.json();return Array.isArray(e)&&e.length?e:i}catch{return i}}M_().then(()=>{Vs(),sh(),Bt("loader").classList.add("done"),Bt("menu").classList.add("show"),Gr.start(),ch()})})();
 
 </script>
-</head>
-<body>
-  <canvas id="scene"></canvas>
-
-  <div id="loader">
-    <div class="mark">AETHERIS</div>
-    <div class="sub">Island Warfare</div>
-    <div class="track"><div id="loadBar"></div></div>
-    <div id="loadStatus">Awakening</div>
-  </div>
-
-  <div id="menu">
-    <div class="menuInner">
-      <h1 class="title">AETHERIS</h1>
-      <p class="tagline">Island Warfare</p>
-
-      <div class="modes">
-        <div class="modeCard" id="btnSolo">
-          <h2>1P · BOT PRACTICE</h2>
-          <p>Drop into the island alone against ruthless AI squads. Loot rifles, shotguns, armour and med kits — last one standing wins the firefight.</p>
-          <span class="kbd">KEYBOARD + MOUSE &nbsp;·&nbsp; OR A CONTROLLER</span>
-          <div>
-            <select id="botCount">
-              <option value="2">2 BOTS</option>
-              <option value="4" selected>4 BOTS</option>
-              <option value="6">6 BOTS</option>
-              <option value="8">8 BOTS</option>
-            </select>
-          </div>
-        </div>
-        <div class="modeCard highlight" id="btnDuo">
-          <h2>2P · SPLIT SCREEN DUEL</h2>
-          <p>Two players, one island, one screen. Player 1 on keyboard and mouse, Player 2 on a controller — or on the arrow-cluster keys if no pad is plugged in.</p>
-          <span class="kbd">P1 KEYBOARD + MOUSE &nbsp;·&nbsp; P2 GAMEPAD / KEYS</span>
-          <div>
-            <select id="killLimit">
-              <option value="10">FIRST TO 10</option>
-              <option value="15" selected>FIRST TO 15</option>
-              <option value="20">FIRST TO 20</option>
-              <option value="30">FIRST TO 30</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="modeCard online" id="btnOnline">
-        <h2>ONLINE · ROOM CODE</h2>
-        <p>Play a friend across the internet on one shared island. Host a room and
-           read them the code, or type the code they give you. No split screen —
-           you each get a full-screen view.</p>
-        <span class="kbd">KEYBOARD + MOUSE &nbsp;·&nbsp; GAMEPAD</span>
-      </div>
-
-      <div class="controlsGrid">
-        <div>
-          <h3>PLAYER 1 — KEYBOARD + MOUSE OR CONTROLLER</h3>
-          <div><span>WASD</span> <i>move</i> &nbsp; <span>MOUSE</span> <i>look</i></div>
-          <div><span>LMB</span> <i>fire</i> &nbsp; <span>RMB</span> <i>aim</i> &nbsp; <span>R</span> <i>reload</i></div>
-          <div><span>SHIFT</span> <i>sprint</i> &nbsp; <span>SPACE</span> <i>jump</i> &nbsp; <span>CTRL</span> <i>crouch</i></div>
-          <div><span>Q</span> <i>med kit</i> &nbsp; <span>F</span> <i>swap</i> &nbsp; <span>1 2 3</span> <i>weapon slots</i></div>
-          <div><span>T</span> <i>time of day</i> &nbsp; <span>M</span> <i>mute</i> &nbsp; <span>ESC</span> <i>pause</i></div>
-          <div style="margin-top:10px"><h3>PLAYER 1 — CONTROLLER (ANY MODE)</h3></div>
-          <div><span>STICKS</span> <i>move / look</i> &nbsp; <span>RT</span> <i>fire</i> &nbsp; <span>LT</span> <i>aim</i></div>
-          <div><span>A</span> <i>jump</i> &nbsp; <span>X</span> <i>reload</i> &nbsp; <span>B / RB</span> <i>swap</i></div>
-          <div><span>LB</span> <i>sprint</i> &nbsp; <span>R3</span> <i>crouch</i> &nbsp; <span>Y</span> <i>med kit</i></div>
-          <div><span>D-PAD</span> <i>weapon slots</i> &nbsp; <span>STICK</span> <i>aim assist when you use it</i></div>
-        </div>
-        <div>
-          <h3>PLAYER 2 — CONTROLLER</h3>
-          <div><span>STICKS</span> <i>move / look</i></div>
-          <div><span>RT</span> <i>fire</i> &nbsp; <span>LT</span> <i>aim</i> &nbsp; <span>X</span> <i>reload</i></div>
-          <div><span>A</span> <i>jump</i> &nbsp; <span>LB</span> <i>sprint</i> &nbsp; <span>R3</span> <i>crouch</i></div>
-          <div><span>Y</span> <i>med kit</i> &nbsp; <span>B / RB</span> <i>swap</i> &nbsp; <span>D-PAD</span> <i>slots</i></div>
-          <div style="margin-top:10px"><h3>PLAYER 2 — NO PAD? KEYS</h3></div>
-          <div><span>IJKL</span> <i>move</i> &nbsp; <span>ARROWS</span> <i>look</i></div>
-          <div><span>ENTER</span> <i>fire</i> &nbsp; <span>RSHIFT</span> <i>aim</i> &nbsp; <span>.</span> <i>reload</i></div>
-          <div><span>'</span> <i>jump</i> &nbsp; <span>\</span> <i>sprint</i> &nbsp; <span>RCTRL</span> <i>crouch</i></div>
-          <div><span>,</span> <i>med kit</i> &nbsp; <span>/</span> <i>swap weapon</i></div>
-        </div>
-      </div>
-
-      <p id="padStatus">NO CONTROLLER — PLAYER 2 NEEDS ONE</p>
-
-      <div class="menuFoot">
-        <span class="build">BUILD <b id="menuVersion">—</b></span>
-        <button class="linkbtn" id="btnChangelog">Change log</button>
-        <span id="updateStatus"></span>
-      </div>
-    </div>
-  </div>
-
-  <div id="changelog">
-    <div class="clPanel">
-      <h2>CHANGE LOG</h2>
-      <p class="clSub" id="changelogSub">Every released version, newest first</p>
-      <div id="changelogBody"></div>
-      <button class="ghostBtn clClose" id="btnChangelogClose">Back</button>
-    </div>
-  </div>
-
-  <div id="hudRoot"></div>
-  <div id="fps">– FPS</div>
-
-  <div id="room">
-    <div class="roomPanel">
-      <h1 class="roomTitle">ONLINE MATCH</h1>
-      <p class="roomSub" id="roomSub">HOST A ROOM OR JOIN WITH A CODE</p>
-
-      <div class="roomRow">
-        <label for="playerName">YOUR NAME</label>
-        <input id="playerName" maxlength="14" placeholder="PLAYER" autocomplete="off" spellcheck="false">
-      </div>
-
-      <div class="roomSplit" id="roomChooser">
-        <div class="roomHalf">
-          <h3>HOST</h3>
-          <div class="roomRow"><label for="roomKills">FIRST TO</label>
-            <select id="roomKills">
-              <option value="10">10 KILLS</option>
-              <option value="15" selected>15 KILLS</option>
-              <option value="20">20 KILLS</option>
-            </select>
-          </div>
-          <button class="bigBtn" id="btnHost">CREATE ROOM</button>
-        </div>
-        <div class="roomHalf">
-          <h3>JOIN</h3>
-          <div class="roomRow"><label for="roomCode">ROOM CODE</label>
-            <input id="roomCode" maxlength="5" placeholder="ABC12" autocomplete="off" spellcheck="false">
-          </div>
-          <button class="bigBtn" id="btnJoin">JOIN ROOM</button>
-        </div>
-      </div>
-
-      <div id="roomLobby" class="roomLobby">
-        <div class="roomCodeLine">
-          <span>ROOM CODE</span>
-          <b id="roomCodeValue">-----</b>
-          <button id="btnCopyCode" title="Copy">COPY</button>
-        </div>
-        <ul id="roomRoster"></ul>
-        <div class="roomMeta">
-          <span id="roomPingLine">PING &#8212;</span>
-          <span id="roomLatencyHint"></span>
-        </div>
-        <button class="bigBtn primary" id="btnStartOnline">WAITING FOR PLAYERS</button>
-        <p class="roomHint" id="roomHint">Share the code. The match starts when the host is ready.</p>
-      </div>
-
-      <p class="roomError" id="roomError"></p>
-      <button class="ghostBtn" id="btnRoomBack">BACK</button>
-    </div>
-  </div>
-
-  <div id="pause">
-    <div class="overlayTitle">PAUSED</div>
-    <div class="overlaySub">Click anywhere to resume</div>
-    <div class="pauseGrid" id="pauseGrid">
-      <div class="pauseRow"><span>Volume</span><input type="range" id="optVolume" min="0" max="100" step="5" value="90" /></div>
-      <div class="pauseRow"><span>Render quality</span>
-        <select id="optQuality">
-          <option value="auto" selected>AUTO</option>
-          <option value="high">HIGH</option>
-          <option value="balanced">BALANCED</option>
-          <option value="low">LOW</option>
-        </select>
-      </div>
-      <div class="pauseRow"><span>Bot difficulty</span>
-        <select id="optDifficulty">
-          <option value="easy" selected>EASY</option>
-          <option value="normal">NORMAL</option>
-          <option value="hard">HARD</option>
-        </select>
-      </div>
-      <div class="pauseRow"><span>Controller sensitivity</span>
-        <input type="range" id="optPadSens" min="20" max="200" step="5" value="75" />
-      </div>
-      <div class="pauseRow"><span>Controller rumble</span>
-        <select id="optRumble">
-          <option value="on" selected>ON</option>
-          <option value="off">OFF</option>
-        </select>
-      </div>
-      <button class="ghostBtn" id="btnQuit">Quit to menu</button>
-      <div class="pauseHint">ESC also resumes</div>
-    </div>
-  </div>
-
-  <div id="victory">
-    <div id="victoryBody"></div>
-    <div class="pauseGrid">
-      <button class="ghostBtn" id="btnRematch">Rematch <span class="keyhint">ENTER</span></button>
-      <button class="ghostBtn" id="btnVictoryMenu">Back to menu <span class="keyhint">ESC</span></button>
-    </div>
-  </div>
-
-  <div id="fatal">
-    <div class="box">
-      <h2>Something went wrong</h2>
-      <div class="msg"></div>
-    </div>
-  </div>
-
-  <!--
-    Boot watchdog. main.js installs its own error handlers, but those cannot
-    run if main.js itself fails to load or parse, so a module-level failure
-    would leave the page frozen on the static "Awakening" text with no
-    explanation. This inline script catches that case.
-
-    Scope matters: a page hosts more than its own scripts. Browser extensions
-    and hosting analytics (the preview proxy injects a Cloudflare beacon) can
-    fail to load at any time, and their failure must never be reported as the
-    game being broken. Only this origin's files are treated as ours, and only
-    until the game has announced that it booted.
-  -->
-  <script>
-    (function () {
-      var reported = false;
-
-      function gameHasBooted() {
-        return !!window.__aetherisBooted;
-      }
-
-      // Conditions that are not startup failures: pointer lock refusing (it is
-      // routinely refused right after Escape) and gamepads coming and going.
-      // Declared here as well as in main.js because this watchdog runs before
-      // the game module exists and must not paint the card for them either.
-      function benign(msg) {
-        return /pointer ?lock|exited the lock|not valid for pointer lock|gamepad|vibration ?actuator/i
-          .test(String(msg || ''));
-      }
-
-      function report(msg) {
-        if (reported || gameHasBooted()) return;
-        if (benign(msg)) return;
-        reported = true;
-        var el = document.getElementById('fatal');
-        var status = document.getElementById('loadStatus');
-        if (status) status.textContent = 'Could not start';
-        if (!el) return;
-        var box = el.querySelector('.msg');
-        if (box) box.textContent = msg;
-        el.classList.add('show');
-      }
-
-      // Is this URL one of ours? Same origin only. Anything else (analytics,
-      // extension resources, CDNs) is not something this game can be blamed for.
-      function isOwnScript(src) {
-        if (!src) return false;
-        try {
-          var u = new URL(src, location.href);
-          return u.origin === location.origin;
-        } catch (_) {
-          return false;
-        }
-      }
-
-      window.addEventListener('error', function (e) {
-        var t = e.target;
-        if (t && t.tagName === 'SCRIPT') {
-          // Some other script on the page failed. If it is not ours, ignore it
-          // completely; if it is ours, say which file so it can be fixed.
-          if (!isOwnScript(t.src)) return;
-          report('A game script failed to load: ' + t.src +
-                 '\n\nReload the page. If it persists, the build is incomplete.');
-          return;
-        }
-        var msg = e.message || String(e.error || 'Unknown error');
-        if (/does not provide an export named|does not export|Importing a module script failed/i.test(msg)) {
-          report('The game loaded a mixture of old and new files.\n\n' +
-                 'Press Ctrl+Shift+R (or Cmd+Shift+R) to reload everything from scratch.');
-          return;
-        }
-        report(msg);
-      }, true);
-
-      window.addEventListener('unhandledrejection', function (e) {
-        var r = e.reason;
-        var msg = r && r.message ? r.message : String(r);
-        // Anything thrown after a successful boot is the game's own business to
-        // surface (it has its own handlers); only startup matters here.
-        report(msg);
-      });
-
-      // If the module never even starts, say so instead of pretending to load.
-      setTimeout(function () {
-        if (gameHasBooted()) return;
-        var status = document.getElementById('loadStatus');
-        if (!status || status.textContent !== 'Awakening') return;
-        report('The game did not start.\n\n' +
-               'Open the browser console (F12) for the exact error, then reload.\n' +
-               'If you are running from a file, make sure you launched Aetheris.exe.');
-      }, 12000);
-    })();
-  </script>
 </body>
 </html>

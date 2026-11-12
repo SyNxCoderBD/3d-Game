@@ -124,5 +124,39 @@ console.log('\n▸ boot watchdog');
   check('a booted game is not accused of not starting', !w.fatal.shown);
 }
 
+/*
+ * 8. The shipped payload must run its bundle after the DOM exists.
+ *
+ * This is the regression that shipped twice: the inliner replaced Vite's
+ * deferred `<script type="module">` in <head> with an immediate classic
+ * `<script>`, so the game ran while document.body was still null. The result
+ * was a loading screen frozen on "Awakening" with *no* crash card, because the
+ * card's own element did not exist yet either. Both checks below would have
+ * caught it.
+ */
+if (fs.existsSync(path.join(ROOT, 'release', 'Aetheris.html'))) {
+  const payload = fs.readFileSync(path.join(ROOT, 'release', 'Aetheris.html'), 'utf8');
+  const bodyAt = payload.search(/<body[^>]*>/i);
+  const closeAt = payload.search(/<\/body\s*>/i);
+
+  const scriptsInHead = (payload.slice(0, bodyAt).match(/<script(?![^>]*\stype=)/gi) || []).length;
+  check('no classic script runs in <head>', scriptsInHead === 0, `${scriptsInHead} found`);
+
+  const bundleAt = payload.indexOf('<script>');
+  check('the game bundle is parsed inside <body>', bundleAt > bodyAt && bundleAt < closeAt);
+
+  // The `$&` bug: a replacement string containing `$&` spliced the matched
+  // `</body>` into the middle of the minified game code.
+  const scripts = [...payload.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const broken = scripts.find((code) => /<\/body>|<body/.test(code));
+  check('no markup was spliced into the bundle', !broken);
+
+  let parses = true;
+  for (const code of scripts) {
+    try { new vm.Script(code); } catch { parses = false; }
+  }
+  check('every inline script parses', parses, `${scripts.length} script(s)`);
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} watchdog: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

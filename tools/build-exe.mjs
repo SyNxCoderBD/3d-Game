@@ -46,26 +46,71 @@ function inlineBundle(html) {
   let out = html;
   let assets = 0;
 
-  out = out.replace(
-    /<script[^>]*\ssrc="([^"]+)"[^>]*>\s*<\/script>/g,
-    (match, src) => {
-      const file = path.join(DIST, src.replace(/^\.?\//, ''));
-      const code = fs.readFileSync(file, 'utf8');
-      if (code.includes('</script')) throw new Error('Bundle contains a literal </script>');
-      assets++;
-      return `<script>\n${code}\n</script>`;
-    }
-  );
+  /*
+   * Inlining must not change *when* a script runs.
+   *
+   * Vite emits `<script type="module" src=...>` in <head>. A module script is
+   * deferred by definition, so it runs after the document has been parsed and
+   * every element exists. Replacing that tag with a plain `<script>` makes it
+   * run immediately, while the parser is still inside <head> — at which point
+   * document.body is null. Then every `document.getElementById(...)` in
+   * main.js returns null, the first null dereference throws, and the browser
+   * has no crash card to show because #fatal does not exist yet either. The
+   * player sees the loading screen forever.
+   *
+   * So the bundle keeps its deferred timing by moving to the end of <body>,
+   * which is where a deferred script effectively runs anyway. The bundle is an
+   * IIFE, not a real module, so it needs the timing, not the module semantics.
+   *
+   * Note on `$`: every insertion below is done by index, never by returning a
+   * replacement string from String.replace. Minified game code contains `$&`,
+   * `$'` and `$1`, and replacement strings expand those — which spliced a
+   * literal `</body>` into the middle of the bundle and broke the whole page.
+   */
+  const insertions = []; // { match: RegExp, code: string, defer: boolean }
+  const placeholders = [];
+
+  out = out.replace(/<script([^>]*)\ssrc="([^"]+)"([^>]*)>\s*<\/script>/g, (match, before, src, after) => {
+    const file = path.join(DIST, src.replace(/^\.?\//, ''));
+    const code = fs.readFileSync(file, 'utf8');
+    if (code.includes('</script')) throw new Error('Bundle contains a literal </script>');
+    assets++;
+
+    const isModule = /type="module"/.test(before + after);
+    const key = `@@AETHERIS_BUNDLE_${placeholders.length}@@`;
+    placeholders.push({ key, code: `<script>\n${code}\n</script>`, defer: isModule });
+    return key;
+  });
 
   out = out.replace(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/g, (match, href) => {
     const file = path.join(DIST, href.replace(/^\.?\//, ''));
     const css = fs.readFileSync(file, 'utf8');
     assets++;
-    return `<style>\n${css}\n</style>`;
+    const key = `@@AETHERIS_STYLE_${placeholders.length}@@`;
+    placeholders.push({ key, code: `<style>\n${css}\n</style>`, defer: false });
+    return key;
   });
 
+  // Now the document is settled: put each piece back, by index.
+  for (const { key, code, defer } of placeholders) {
+    const at = out.indexOf(key);
+    if (at < 0) throw new Error(`inline placeholder ${key} was lost`);
+    if (!defer) {
+      out = out.slice(0, at) + code + out.slice(at + key.length);
+      continue;
+    }
+    const closeAt = out.search(/<\/body\s*>/i);
+    if (closeAt < 0) throw new Error('payload has no </body> to defer the bundle into');
+    out = out.slice(0, at) + out.slice(at + key.length);
+    const closeNow = out.search(/<\/body\s*>/i);
+    out = out.slice(0, closeNow) + code + '\n' + out.slice(closeNow);
+  }
+
+  if (/@@AETHERIS_(BUNDLE|STYLE)_/.test(out)) throw new Error('an inline placeholder was not replaced');
+  if (assets && !out.includes('<script>')) throw new Error('the bundle did not survive inlining');
+
   // Any leftover asset references mean the page would break in a single file.
-  const leftover = out.match(/(?:src|href)="\.?\/?assets\/[^"]+"/g);
+  const leftover = out.match(/[Ss]rc="\.?\/?assets\/[^"]+"/g);
   if (leftover) throw new Error(`Un-inlined assets: ${leftover.join(', ')}`);
 
   return { html: out, assets };
@@ -189,6 +234,38 @@ async function main() {
   const { html, assets } = inlineBundle(raw);
   const payload = Buffer.from(html, 'utf8');
   console.log(`  inlined ${assets} asset(s) → ${(payload.length / 1024).toFixed(0)} KB`);
+
+  /*
+   * The bundle must not run before the elements it looks up exist.
+   *
+   * This is a regression guard with a real failure behind it: the inliner used
+   * to strip `type="module"`, turning a deferred head script into an immediate
+   * one. main.js then ran with document.body === null, threw on the first
+   * getElementById that returned null, and the game stopped on its loading
+   * screen with no error card — the crash card could not be shown because
+   * #fatal did not exist yet either.
+   */
+  {
+    const bodyAt = html.search(/<body[^>]*>/i);
+    const closeAt = html.search(/<\/body\s*>/i);
+    if (bodyAt < 0 || closeAt < 0) throw new Error('payload has no <body>');
+    const head = html.slice(0, bodyAt);
+
+    // No executable script may sit in the head: a classic one runs too early,
+    // and a module one would need a second request that cannot exist in a
+    // single file.
+    const headScripts = head.match(/<script(?![^>]*\stype=)/gi) || [];
+    if (headScripts.length) {
+      throw new Error(`${headScripts.length} classic script(s) run in <head>, before the DOM exists`);
+    }
+
+    // The game bundle must be in the body and parsed into it.
+    const body = html.slice(bodyAt, closeAt);
+    if (!/game did not start/.test(body)) throw new Error('the boot watchdog is not in <body>');
+    if (/<script[^>]*\ssrc=/.test(html)) throw new Error('a script src survived inlining');
+
+    console.log('  the bundle runs after the DOM exists ✓');
+  }
 
   await fsp.mkdir(BUILD, { recursive: true });
   await fsp.mkdir(RELEASE, { recursive: true });

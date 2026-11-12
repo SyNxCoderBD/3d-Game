@@ -180,7 +180,29 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
-### 1.5.2 — the open game keeps its own server alive
+### 1.5.3 — the game could not start at all from the exe
+- **Fixed the frozen "Awakening" screen.** The .exe opened a window that sat on
+  the loading text forever and then said "The game did not start", with no
+  useful error. The server was fine — the page loaded, styled and titled
+  correctly — but the game's own script never ran to completion.
+- Cause: Vite emits the bundle as `<script type="module" src=...>` in the
+  document head. A module script is deferred, so it runs after every element
+  exists. The single-file packer replaced that tag with a plain `<script>`,
+  which runs *immediately*, while the parser is still inside the head — at that
+  moment `document.body` is `null`. The first `document.getElementById('scene')`
+  returned null, the next line dereferenced it, and the game died on the way in.
+  It could not even show its error card, because `#fatal` did not exist yet.
+- The bundle is now placed at the end of `<body>`, where a deferred script
+  would have run, so the DOM is complete before any of it executes.
+- Also fixed two bugs in the packer found while chasing this: inserting the
+  bundle with a replacement string expanded `$&` and `$'` sequences that occur
+  throughout the minified code, which spliced a literal `</body>` into the
+  middle of the JavaScript. All insertions now splice by index.
+- The build now refuses to ship a payload with a classic script in the head, a
+  bundle outside the body, spliced markup, or a script that does not parse, and
+  the watchdog suite checks the same things on the shipped file.
+
+### 1.5.2 — the open game keeps its server alive
 - **Reloading the game, or downloading an update mid-session, could still hit
   `ERR_CONNECTION_REFUSED`.** 1.5.1 stopped shutting the server down with the
   browser process, but replaced that with "stop after a few idle seconds" —
