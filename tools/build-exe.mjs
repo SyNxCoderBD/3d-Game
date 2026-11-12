@@ -125,6 +125,22 @@ int main(int argc, char **argv) {
       throw new Error(`loopback server returned ${got.length} bytes, expected ${html.length}`);
     }
     console.log(`  served ${(got.length / 1024).toFixed(0)} KB over 127.0.0.1:${port} ✓`);
+
+    /*
+     * The server must outlive the browser process it was started for.
+     *
+     * Chromium uses a process singleton: the exe the launcher spawns usually
+     * forwards the URL to an existing instance and exits immediately. The old
+     * launcher waited on that handle and stopped the server the moment it
+     * signalled, so the real window opened onto a dead port and showed
+     * ERR_CONNECTION_REFUSED. The fix is to keep serving while requests keep
+     * arriving, which is what this exercises: stay quiet past one idle step and
+     * the port must still answer.
+     */
+    await new Promise((r) => setTimeout(r, 1500));
+    const afterIdle = await fetch(`http://127.0.0.1:${port}/`).then((r) => r.status).catch(() => 0);
+    if (afterIdle !== 200) throw new Error(`server stopped after an idle gap (status ${afterIdle})`);
+    console.log('  survives an idle gap after spawn ✓');
   } finally {
     child.kill('SIGKILL');
     await fsp.rm(tmp, { recursive: true, force: true });

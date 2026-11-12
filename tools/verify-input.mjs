@@ -559,6 +559,46 @@ async function main() {
     });
   }
 
+  /* ------------------------------------------------------- launcher liveness */
+
+  // The reported symptom was ERR_CONNECTION_REFUSED at 127.0.0.1:<port> when
+  // running the exe. Cause: the launcher waited on the spawned browser process
+  // and stopped the server when it signalled, but Chromium forwards to an
+  // existing instance and exits immediately, so the real window opened onto a
+  // dead port. The server must instead outlive the process and shut down on
+  // idleness.
+  {
+    const { readFileSync } = await import('node:fs');
+    const launcher = readFileSync(new URL('../launcher/launcher.c', import.meta.url), 'utf8');
+    const server = readFileSync(new URL('../launcher/localserver.c', import.meta.url), 'utf8');
+
+    check('the launcher does not stop the server on browser process exit', () => {
+      assert.ok(!/WaitForSingleObject\(\s*pi\.hProcess\s*,\s*INFINITE\s*\)/.test(launcher),
+        'still waiting on the browser handle with INFINITE');
+    });
+
+    check('the server is kept alive on idleness instead', () => {
+      assert.ok(/srv_wait_for_idle/.test(launcher), 'launcher must wait for idle');
+      assert.ok(/srv_wait_for_idle/.test(server), 'and the server must implement it');
+    });
+
+    check('requests are counted so idleness is measurable', () => {
+      assert.ok(/requests\s*=\s*srv->requests\s*\+\s*1/.test(server),
+        'every request must bump the activity counter');
+    });
+
+    check('a cold start is not timed out before the first request', () => {
+      assert.ok(/SRV_FIRST_REQUEST_GRACE_MS/.test(server),
+        'the pre-first-request allowance must be generous');
+      const v = server.match(/SRV_FIRST_REQUEST_GRACE_MS \(([^)]+)\)/);
+      assert.ok(v, 'grace period must be defined');
+    });
+
+    check('the idle loop has a hard ceiling', () => {
+      assert.ok(/SRV_MAX_UPTIME_MS/.test(server), 'a stuck launcher must not live forever');
+    });
+  }
+
   /* ------------------------------------------------------------- lobby hint */
 
   // The guest's lobby must stop saying "waiting" the moment the host starts.

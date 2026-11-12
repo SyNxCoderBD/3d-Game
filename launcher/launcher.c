@@ -344,10 +344,28 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
     ZeroMemory(&pi, sizeof(pi));
 
     if (CreateProcessW(browser, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-      WaitForSingleObject(pi.hProcess, INFINITE);
+      /*
+       * Do NOT stop the server when the spawned process exits.
+       *
+       * Chromium browsers use a process singleton: the chrome.exe this program
+       * starts frequently forwards the request to an already-running browser
+       * instance and exits immediately. Waiting on that handle and then calling
+       * srv_stop() therefore closed the listening socket while the actual
+       * browser window was still opening, and the window landed on a dead port:
+       * ERR_CONNECTION_REFUSED at 127.0.0.1:<port>. It looked intermittent
+       * because it depended on whether the spawned process survived.
+       *
+       * The window is gone when there is nothing left reading the page, so the
+       * server stays up while anyone is polling it and shuts down a few seconds
+       * after the last request. That covers both the forwarded and the direct
+       * case, and it cleans up when the player closes the game.
+       */
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
-      if (served) srv_stop(&server);
+      if (served) {
+        srv_wait_for_idle(&server, SRV_IDLE_SHUTDOWN_MS, SRV_MAX_UPTIME_MS);
+        srv_stop(&server);
+      }
       return 0;
     }
     /* The browser refused to start: release the port before trying the shell. */

@@ -180,6 +180,14 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.5.1 — the launcher stopped before the window opened
+- **Fixed `ERR_CONNECTION_REFUSED at 127.0.0.1` when starting the exe.** The
+  launcher started a local server, opened the browser at it, then waited for the
+  browser *process* to exit and shut the server down. Chromium forwards the URL
+  to an already-running instance and exits immediately, so the server was
+  switched off while the real window was still opening. It now stays up while
+  the page is being read and shuts down after a few idle seconds.
+
 ### 1.5.0 — the fixes that needed a screenshot
 - **The scope works.** The sniper's teal disc is gone (it was the viewmodel's
   emissive lens sitting 25 cm from the eye), the reticle is sized to the lens

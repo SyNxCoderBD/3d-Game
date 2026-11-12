@@ -45,6 +45,16 @@ typedef int sock_t;
 #define SRV_MAX_REQUEST 4096
 #define SRV_READ_TIMEOUT_SEC 3
 
+/*
+ * How long the launcher keeps the game served after the browser process it
+ * spawned has gone. See srv_wait_for_idle: Chromium forwards to an existing
+ * instance and exits, so process exit is not the end of the session.
+ */
+#define SRV_IDLE_SHUTDOWN_MS 8000u        /* no requests for 8 s -> done */
+#define SRV_MAX_UPTIME_MS (6u * 3600u * 1000u)  /* hard ceiling: 6 hours */
+/* How long to keep serving before the browser asks for anything at all. */
+#define SRV_FIRST_REQUEST_GRACE_MS (5u * 60u * 1000u)   /* 5 minutes */
+
 /* The one write endpoint this server has. */
 #define SRV_UPDATE_PATH "/__aetheris/staged"
 #define SRV_UPDATE_PATH_LEN 18
@@ -71,9 +81,19 @@ typedef struct {
   const char *path;        /* file to serve for every GET */
   const char *staged_path; /* where POST /__aetheris/staged writes a new build */
   volatile int stop;
+  volatile long requests;  /* incremented per served request; see srv_wait_for_idle */
   char status[256];        /* outcome of the last staged upload */
   char error[256];
 } local_server;
+
+/* Portable millisecond sleep, so the wait loop reads the same on both targets. */
+static void srv_sleep_ms(unsigned ms) {
+#ifdef _WIN32
+  Sleep(ms);
+#else
+  usleep((useconds_t)ms * 1000);
+#endif
+}
 
 static void srv_set_timeout(sock_t s, int seconds) {
 #ifdef _WIN32
@@ -288,6 +308,10 @@ static void srv_handle_update(local_server *srv, sock_t client, const char *req,
 }
 
 static void srv_serve_one(local_server *srv, sock_t client) {
+  /* Any traffic, of any kind, means a live page. Volatile, no atomic needed:
+   * the counter is only ever compared for change. */
+  srv->requests = srv->requests + 1;
+
   char req[SRV_MAX_REQUEST];
   int n = recv(client, req, sizeof(req) - 1, 0);
   if (n <= 0) return;
@@ -456,6 +480,48 @@ static int srv_start_ex(local_server *srv, const char *path, const char *staged_
 
 static int srv_start(local_server *srv, const char *path) {
   return srv_start_ex(srv, path, NULL);
+}
+
+/*
+ * Keep serving until nobody has asked for anything for `idle_ms`.
+ *
+ * This replaces waiting on the browser's process handle. Chromium's process
+ * singleton means the executable we launch usually forwards to an existing
+ * instance and exits at once, so that handle says "done" while the real window
+ * is still opening; stopping the server there produced ERR_CONNECTION_REFUSED
+ * on a loopback URL that had been perfectly valid a moment earlier.
+ *
+ * A running game polls the loopback origin continuously (the update check, the
+ * page itself), so genuine play keeps the counter moving. `max_ms` is a hard
+ * ceiling so a launcher instance can never outlive its usefulness if the page
+ * is left open and silent for a very long time.
+ */
+static void srv_wait_for_idle(local_server *srv, unsigned idle_ms, unsigned max_ms) {
+  unsigned long seen = (unsigned long)srv->requests;
+  unsigned long waited = 0;
+  unsigned long quiet = 0;
+  const unsigned step = 250;
+
+  while (!srv->stop) {
+    srv_sleep_ms(step);
+    waited += step;
+
+    unsigned long now = (unsigned long)srv->requests;
+    if (now != seen) {
+      seen = now;
+      quiet = 0;
+    } else {
+      quiet += step;
+    }
+
+    /* Only start counting idle time once the page has been opened. A browser
+     * that is still starting — first run, cold profile, a slow disk — must
+     * never be timed out before it has asked for anything, so the pre-first-
+     * request allowance is deliberately long. */
+    if (seen > 0 && quiet >= idle_ms) break;
+    if (!seen && waited >= SRV_FIRST_REQUEST_GRACE_MS) break;
+    if (waited >= max_ms) break;
+  }
 }
 
 static void srv_stop(local_server *srv) {
