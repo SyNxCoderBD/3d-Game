@@ -52,6 +52,7 @@ const PANE_TEMPLATE = `
     <div class="scope-ring"></div>
     <div class="scope-cross v"></div>
     <div class="scope-cross h"></div>
+    <div class="scope-dot"></div>
     <div class="scope-mildots"><i></i><i></i><i></i><i></i><i></i></div>
     <div class="scope-label">AWM .338</div>
   </div>
@@ -245,8 +246,10 @@ export class Hud {
       pane.deathSub.textContent = `SPECTATING · RESPAWN IN ${Math.max(0, fighter.respawnTimer).toFixed(1)}s`;
       pane.crosshair.style.opacity = '0';
     } else {
-      const scoped = def.kind === 'sniper' && fighter.aimT > 0.82;
-      pane.crosshair.style.opacity = scoped ? '0' : '1';
+      // The crosshair yields to whichever sight picture is up, or the two
+      // reticles would double up at the aim point.
+      const sighted = (def.kind === 'sniper' || def.kind === 'rifle') && fighter.aimT > 0.82;
+      pane.crosshair.style.opacity = sighted ? '0' : '1';
     }
 
     // Red reticle while an enemy is under the crosshair.
@@ -263,9 +266,16 @@ export class Hud {
     }
     pane.crosshair.classList.toggle('ads', fighter.aimT > 0.5);
 
-    // Sniper scope overlay: only while fully zoomed.
+    /*
+     * Scope overlay. The sniper gets the full lens; the rifle's red-dot gets a
+     * small window too, because at 0.2 m the optic's own rear element covers a
+     * sixth of the pane and an opaque disc over the aim point is exactly what
+     * made the AR-15 "just black" when aiming.
+     */
     const scoped = def.kind === 'sniper' && fighter.aimT > 0.82;
-    pane.scope.classList.toggle('show', scoped);
+    const redDot = def.kind === 'rifle' && fighter.aimT > 0.82;
+    pane.scope.classList.toggle('show', scoped || redDot);
+    pane.scope.classList.toggle('reddot', redDot);
     if (pane.scopeLabel) pane.scopeLabel.textContent = def.name;
 
     // Weapon swap flash on the name plate.

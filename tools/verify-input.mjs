@@ -404,6 +404,66 @@ async function main() {
     });
   }
 
+  /* ---------------------------------------------------- one pad per player */
+
+  // The reported bug: a single controller drove both soldiers, because both
+  // players' devices requested index 0 and the getter fell back to "any
+  // connected pad". Two devices must never resolve to the same controller.
+  {
+    const realNavigator = globalThis.navigator;
+    const padAt = (i) => ({
+      index: i, connected: true,
+      axes: [i === 0 ? -1 : 1, 0, 0, 0],   // opposite stick directions
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    });
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { getGamepads: () => [padAt(0), padAt(1)] },
+      configurable: true,
+    });
+
+    const a = new GamepadInput(0).bindToIndex(0);
+    const b = new GamepadInput(1).bindToIndex(1);
+    a.enabled = true;
+    b.enabled = true;
+
+    check('two players read two different pads', () => {
+      assert.notEqual(a.pad, b.pad, 'both devices resolved to the same pad');
+      assert.equal(a.pad.index, 0);
+      assert.equal(b.pad.index, 1);
+    });
+
+    check('each pad drives only its own player', () => {
+      const ia = a.poll(1 / 60);
+      const ib = b.poll(1 / 60);
+      assert.equal(Math.sign(ia.strafe), -1, 'pad 0 should strafe left');
+      assert.equal(Math.sign(ib.strafe), 1, 'pad 1 should strafe right');
+    });
+
+    // With only one pad present, the second player must stay silent rather
+    // than hijacking player 1's controller.
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { getGamepads: () => [padAt(0)] },
+      configurable: true,
+    });
+    const lone = new GamepadInput(1).bindToIndex(1);
+    lone.enabled = true;
+    check('a pinned device never adopts another slot\'s pad', () => {
+      assert.equal(lone.pad, null, 'player 2 grabbed player 1\'s controller');
+      const out = lone.poll(1 / 60);
+      assert.equal(out.strafe, 0);
+      assert.equal(out.forward, 0);
+    });
+
+    // An unpinned device still may (solo play).
+    const free = new GamepadInput(0);
+    free.enabled = true;
+    check('an unpinned device still finds a lone pad', () => {
+      assert.ok(free.pad, 'solo play must find the only controller present');
+    });
+
+    Object.defineProperty(globalThis, 'navigator', { value: realNavigator, configurable: true });
+  }
+
   /* -------------------------------------------------------------- sniper ADS */
 
   // The teal disc over the aim point was the sniper viewmodel's emissive lens
@@ -436,6 +496,29 @@ async function main() {
       const z = fn.match(/lerp\(-0\.38,\s*(-?[\d.]+),\s*this\.aimT\)/);
       assert.ok(z, 'viewmodel z lerp must be findable');
       assert.ok(Math.abs(Number(z[1])) > 0.03, `ends at z=${z[1]}, inside the near plane`);
+    });
+
+    check('the rifle optic is capped at both ends', () => {
+      // An open tube at the eye shows its unlit interior: that was the black
+      // screen on the AR-15. Both mouths must have a lens.
+      const rifle = weapons.slice(weapons.indexOf('function buildRifle'), weapons.indexOf('function buildShotgun'));
+      const glass = rifle.match(/M\.opticGlass/g) || [];
+      assert.ok(glass.length >= 2, `expected capped optic, found ${glass.length} lens cap(s)`);
+    });
+
+    check('no viewmodel lens uses the bright emissive glass', () => {
+      // The teal material is fine on the body model, but at the eye it has to
+      // be dark or it becomes a coloured disc over the aim point.
+      for (const fn of ['function buildRifle', 'function buildSniper']) {
+        const body = weapons.slice(weapons.indexOf(fn), weapons.indexOf(fn) + 3000);
+        const bright = (body.match(/M\.glass/g) || []).length;
+        if (fn === 'function buildRifle') assert.equal(bright, 0, 'rifle still uses the bright lens');
+      }
+    });
+
+    check('the rifle gets a sight picture when aiming', () => {
+      assert.ok(/redDot/.test(hud), 'the red-dot overlay must be wired');
+      assert.ok(/def\.kind === 'rifle'/.test(hud), 'and keyed off the rifle kind');
     });
 
     check('the scope lens is emissive enough to need hiding', () => {

@@ -685,9 +685,13 @@ export class Fighter {
     // shows as a flat cross-section — and for a scoped sniper the viewmodel is
     // hidden entirely (see below), so this end position only applies to the
     // hip-fire and iron-sight weapons that stay visible.
-    // Keep this threshold in step with the HUD scope overlay (hud.js), or the
+    // Keep these thresholds in step with the HUD scope overlay (hud.js), or the
     // gun disappears while the reticle is still hidden.
-    const scoped = this.weapon.kind === 'sniper' && this.aimT > 0.82;
+    //
+    // The rifle hides too: its red-dot sits ~0.2 m from the eye, and an opaque
+    // optic over the aim point is what made the AR-15 look black when aiming.
+    const scoped = (this.weapon.kind === 'sniper' || this.weapon.kind === 'rifle') &&
+      this.aimT > 0.82;
     const target = _v1.set(
       lerp(0.21, 0.0, this.aimT),
       lerp(-0.20, -0.118, this.aimT) + Math.sin(this.bob) * 0.006 * this.bobWeight,

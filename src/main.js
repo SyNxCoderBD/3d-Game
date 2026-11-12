@@ -461,9 +461,15 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
       camera: game.cam2, bodyLayer: 2, viewLayer: 3,
       palette: 'p2', spawnPoints: game.spawnPoints,
     });
-    const pad = new GamepadInput(0, {
+    /*
+     * Player 2 owns the *second* pad. Both slots used to request index 0, and
+     * the pad getter falls back to any connected device, so a single controller
+     * drove both soldiers — the stick moved player 1 and player 2 at once.
+     * Pinning the slot means each player reads its own controller or nothing.
+     */
+    const pad = new GamepadInput(1, {
       lookSpeed: PAD_LOOK_BASE * Math.max(0.2, Math.min(2, settings.padSensitivity ?? 0.75)),
-    });
+    }).bindToIndex(1);
     if (pad.connected) {
       game.input2 = pad;
       p2.inputSource = 'pad';
@@ -567,6 +573,10 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
   p1pad = new GamepadInput(0, {
     lookSpeed: PAD_LOOK_BASE * Math.max(0.2, Math.min(2, settings.padSensitivity ?? 0.75)),
   });
+  // In a split-screen duel player 2 needs the other controller, so player 1
+  // must not grab whatever pad it can find. Solo play has only one player, so
+  // P1 may use any pad that is plugged in.
+  if (mode === 'duo') p1pad.bindToIndex(0);
   game.input1 = new HybridInput(kbm, p1pad);
   game.input1.enabled = true;
   game.input1.onLockLost = () => {

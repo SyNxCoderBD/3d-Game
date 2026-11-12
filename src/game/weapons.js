@@ -120,6 +120,17 @@ const M = {
   glass: new THREE.MeshStandardMaterial({
     color: 0x49e2d4, emissive: 0x1d9a90, emissiveIntensity: 2.2, metalness: 0.3, roughness: 0.08,
   }),
+  /*
+   * Optic glass that reads as glass. The shared `glass` material is a bright
+   * emissive teal, which is wrong at the one place it matters most: the rear
+   * element of a scope, where the player's eye is a few centimetres away.
+   * This one is near-black, opaque and slightly reflective, so a lens seen
+   * edge-on looks like a lens rather than like a hole.
+   */
+  opticGlass: new THREE.MeshStandardMaterial({
+    color: 0x0a1620, emissive: 0x0d2b3a, emissiveIntensity: 0.5,
+    metalness: 0.6, roughness: 0.18,
+  }),
   accent: new THREE.MeshStandardMaterial({ color: 0xc9a24d, metalness: 0.9, roughness: 0.28 }),
   brass: new THREE.MeshStandardMaterial({ color: 0xb08d3f, metalness: 1.0, roughness: 0.35 }),
 };
@@ -256,11 +267,31 @@ function buildRifle() {
   b(g, 0.042, 0.12, 0.07, M.polymer, [0, -0.085, -0.085], [-0.12, 0, 0], 0.008);
   b(g, 0.04, 0.075, 0.062, M.polymer, [0, -0.175, -0.10], [-0.3, 0, 0], 0.008);
 
-  // optic
+  /*
+   * Optic: a short red-dot tube rather than a long scope.
+   *
+   * It used to be a 0.11 m cylinder open at the back with its mouth exactly at
+   * the eye, so aiming down sights showed the unlit inside of the tube — a
+   * black disc over the aim point. Capping both ends with dark glass and
+   * shortening the tube makes it read as an optic at every distance.
+   */
+  /*
+   * Optic: a small red-dot.
+   *
+   * It has to survive being stared through at 0.2 m with a 50 deg FOV. A wide
+   * tube there becomes a dark disc over the aim point, and an *open* tube is
+   * worse still — you see the unlit inside of the cylinder, which is the black
+   * screen this used to produce. So: narrow tube, both ends capped with dark
+   * glass, and a bright dot on the front element so the optic reads as a sight
+   * instead of as an obstruction.
+   */
   b(g, 0.026, 0.03, 0.045, M.steel, [0, 0.085, -0.02], null, 0.004);
-  c(g, 0.028, 0.028, 0.11, M.steel, [0, 0.115, -0.055], [Math.PI / 2, 0, 0], 16);
-  c(g, 0.026, 0.026, 0.008, M.glass, [0, 0.115, -0.112], [Math.PI / 2, 0, 0], 16);
-  b(g, 0.03, 0.014, 0.02, M.steel, [0, 0.115, -0.005], null, 0.004);
+  c(g, 0.019, 0.019, 0.058, M.steel, [0, 0.115, -0.085], [Math.PI / 2, 0, 0], 16);
+  c(g, 0.017, 0.017, 0.007, M.opticGlass, [0, 0.115, -0.115], [Math.PI / 2, 0, 0], 16); // front
+  c(g, 0.017, 0.017, 0.007, M.opticGlass, [0, 0.115, -0.056], [Math.PI / 2, 0, 0], 16); // rear
+  // The dot itself: a tiny emissive cap on the inside of the front element.
+  c(g, 0.0022, 0.0022, 0.002, M.accent, [0, 0.115, -0.111], [Math.PI / 2, 0, 0], 8);
+  b(g, 0.03, 0.014, 0.02, M.steel, [0, 0.115, -0.054], null, 0.004);
 
   // details
   b(g, 0.014, 0.014, 0.05, M.steel, [0.032, 0.03, 0.02], null, 0.004);        // charging handle

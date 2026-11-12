@@ -344,6 +344,7 @@ export class GamepadInput {
     this.prevButtons = [];
     this.rumbleUntil = 0;
     this._lastPad = null;
+    this.exclusive = false;
   }
 
   /**
@@ -360,6 +361,21 @@ export class GamepadInput {
    * So: read it defensively, remember the last non-null pad, and only ever
    * report it missing after the browser has told us it disconnected.
    */
+  /**
+   * Restrict this device to one specific pad slot.
+   *
+   * Two players sharing one controller was the bug: both slots asked for index
+   * 0, and the getter below falls back to "any connected pad", so with a single
+   * controller plugged in player 2's device happily read player 1's pad too and
+   * the stick drove both soldiers. A device pinned this way reports that pad or
+   * nothing.
+   */
+  bindToIndex(index) {
+    this.index = index;
+    this.exclusive = true;
+    return this;
+  }
+
   get pad() {
     // Did the browser hand us an entry that is present but marked disconnected?
     // That is the one unambiguous disconnect signal: an *absent* slot is not
@@ -378,16 +394,21 @@ export class GamepadInput {
         let anyLive = false;
         for (const p of pads) {
           if (!p) continue;
-          if (p.connected) { anyLive = true; this._lastPad = p; return p; }
+          if (p.connected) {
+            anyLive = true;
+            // A device pinned to a slot must never adopt a different pad.
+            if (this.exclusive) continue;
+            this._lastPad = p;
+            return p;
+          }
           sawDisconnect = true;
         }
-        // A live pad elsewhere already returned above; nothing else to do.
-        if (anyLive) return this._lastPad || null;
+        if (anyLive) return this.exclusive ? null : (this._lastPad || null);
       }
     } catch (_) {
       /* getGamepads is not available here; fall back to the cached pad */
     }
-    if (sawDisconnect) {
+    if (sawDisconnect && !this.exclusive) {
       // The pad we were holding has gone. Note this is checked against what the
       // browser reports now, not against the latched object's own stale
       // `connected` flag, which keeps saying true after the pad is unplugged.
