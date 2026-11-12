@@ -559,61 +559,31 @@ async function main() {
     });
   }
 
-  /* ------------------------------------------------------- launcher liveness */
+  /* ------------------------------------------------------- liveness contract */
 
-  // The reported symptom was ERR_CONNECTION_REFUSED at 127.0.0.1:<port> when
-  // running the exe. Cause: the launcher waited on the spawned browser process
-  // and stopped the server when it signalled, but Chromium forwards to an
-  // existing instance and exits immediately, so the real window opened onto a
-  // dead port. The server must instead outlive the process and shut down on
-  // idleness.
+  // The game page still announces that it is open, and the shared inliner still
+  // puts the bundle after the DOM. Both are cheap to assert and both have a
+  // shipped bug behind them; only the C launcher that consumes the check-ins is
+  // gone, so the assertions that read launcher/localserver.c are not.
   {
     const { readFileSync } = await import('node:fs');
-    const launcher = readFileSync(new URL('../launcher/launcher.c', import.meta.url), 'utf8');
-    const server = readFileSync(new URL('../launcher/localserver.c', import.meta.url), 'utf8');
 
-    check('the launcher does not stop the server on browser process exit', () => {
-      assert.ok(!/WaitForSingleObject\(\s*pi\.hProcess\s*,\s*INFINITE\s*\)/.test(launcher),
-        'still waiting on the browser handle with INFINITE');
-    });
-
-    check('the server is kept alive until the page says it is gone', () => {
-      assert.ok(/srv_wait_for_idle/.test(launcher), 'launcher must wait for the page');
-      assert.ok(/srv_wait_for_idle/.test(server), 'and the server must implement it');
-    });
-
-    check('the open page can check in, and those check-ins are counted', () => {
-      assert.ok(/SRV_ALIVE_PATH/.test(server), 'a liveness endpoint must exist');
-      assert.ok(/beats\s*=\s*srv->beats\s*\+\s*1/.test(server), 'check-ins must be counted');
-      assert.ok(/SRV_ALIVE_TIMEOUT_MS/.test(server), 'silence must eventually end the session');
-    });
-
-    check('the page polls the liveness endpoint', () => {
+    check('the page still polls a liveness endpoint', () => {
       const page = readFileSync(new URL('../src/net/heartbeat.js', import.meta.url), 'utf8');
       assert.ok(/__aetheris\/alive/.test(page), 'the game must announce itself');
       assert.ok(/setInterval/.test(page), 'and keep doing it while open');
     });
 
-    check('a page that never polls still shuts down on idleness', () => {
-      // Old cached bundles predate the heartbeat; they must not pin a server
-      // open forever.
-      assert.ok(/quiet\s*>=\s*idle_ms/.test(server), 'idle fallback must remain');
+    check('liveness failure can never break the game', () => {
+      const page = readFileSync(new URL('../src/net/heartbeat.js', import.meta.url), 'utf8');
+      assert.ok(/catch/.test(page), 'the poll must swallow its own errors');
     });
 
-    check('requests are counted so idleness is measurable', () => {
-      assert.ok(/requests\s*=\s*srv->requests\s*\+\s*1/.test(server),
-        'every request must bump the activity counter');
-    });
-
-    check('a cold start is not timed out before the first request', () => {
-      assert.ok(/SRV_FIRST_REQUEST_GRACE_MS/.test(server),
-        'the pre-first-request allowance must be generous');
-      const v = server.match(/SRV_FIRST_REQUEST_GRACE_MS \(([^)]+)\)/);
-      assert.ok(v, 'grace period must be defined');
-    });
-
-    check('the idle loop has a hard ceiling', () => {
-      assert.ok(/SRV_MAX_UPTIME_MS/.test(server), 'a stuck launcher must not live forever');
+    check('inlining keeps the bundle out of <head>', () => {
+      const inliner = readFileSync(new URL('../tools/inline.mjs', import.meta.url), 'utf8');
+      assert.ok(/<\/body/.test(inliner), 'deferred bundles must be relocated into the body');
+      assert.ok(/out\.slice\(0, closeNow\)/.test(inliner),
+        'insertions must splice by index, never through a replacement string');
     });
   }
 

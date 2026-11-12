@@ -6,12 +6,15 @@ position on the minimap and through the on-screen enemy tracker. Loot rifles,
 SMGs, shotguns, sniper rifles, armour and med kits scattered across the island.
 Or drop in solo against AI squads in bot practice.
 
-It ships as **one portable Windows executable**.
+It ships as **one self-contained web page**.
 
 ```
-release/Aetheris.exe      ← double-click. That's it. (~0.7 MB)
-release/Aetheris.html     ← same build, opens in any browser
+release/Aetheris-web-1.6.0.zip   ← unzip, serve index.html as a static site
+release/Aetheris.html            ← the same file, opens in any browser
 ```
+
+There is no install, no runtime, no server-side code and no API key. The zip
+holds a single `index.html` with the game, its styles and its code inlined.
 
 Everything below the menus was built from scratch: the island, the soldiers,
 the guns, the hit detection, and every gunshot you hear.
@@ -20,26 +23,29 @@ the guns, the hit detection, and every gunshot you hear.
 
 ## Run it
 
-1. Download `release/Aetheris.exe` anywhere (Desktop, USB stick, wherever).
-2. Double-click it.
+**Play locally.** Open `release/Aetheris.html` in a browser. Single-player,
+split-screen and bot practice all work straight from disk.
 
-Nothing is installed and no admin rights are needed. On launch the exe unpacks
-its embedded world into `%TEMP%\AetherisIsle` and opens it in a borderless
-app-mode window using the Edge / Chrome engine that already ships with Windows.
+**Play with someone else.** Online rooms need a real `http://` origin — a
+`file://` page has an opaque origin and the browser blocks the cross-origin
+calls. Serve the folder and share the address:
+
+```bash
+npm run build:web
+cd release/aetheris-web-1.6.0 && python3 -m http.server 8080
+```
+
+**Put it online.** Unzip `release/Aetheris-web-<version>.zip` and deploy
+`index.html` to any static host — Netlify, Vercel, GitHub Pages, Cloudflare
+Pages, S3, nginx. There is nothing to configure; the folder is the whole site.
+The zip's `README.txt` repeats these steps for whoever deploys it.
 
 The build you are running is printed in the main menu, next to a **Change log**
-button that lists every published release. You never have to download a new exe
-to get a new version: on launch the game asks for the newest published build and,
-if there is one, installs it for the next start. See `docs/RELEASING.md`.
+button that lists every published release.
 
-> **SmartScreen:** the binary is unsigned, so Windows may show
-> *"Windows protected your PC"* the first time. Click **More info → Run anyway**.
-> Some antivirus tools also flag unsigned self-extracting launchers; the source
-> for the launcher is `launcher/launcher.c` — it is ~230 lines and does nothing
-> except unpack the HTML payload and start the browser.
-
-Works on Windows 10 / 11. Microsoft Edge is required (it is preinstalled on
-both); Chrome, Brave and Vivaldi are also detected.
+Runs in any modern browser with WebGL2: Chrome, Edge, Firefox or Safari. On a
+deployed copy the game plays the version it was deployed as — the self-updater
+belongs to the old Windows launcher, which is no longer part of this project.
 
 ## Modes
 
@@ -180,6 +186,25 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.6.0 — the game is a website now
+- **The Windows executable is gone.** It was a launcher wrapped around the same
+  web build, and every problem that survived into this release was a launcher
+  problem: a server that stopped too early, a browser that refused to connect to
+  it, an inliner that changed when the game's script ran. None of that exists
+  when the game is just a page. `launcher/`, `tools/build-exe.mjs` and the tests
+  that compiled C are removed.
+- **`npm run build:web`** produces `release/Aetheris.html` and a deployable
+  `release/Aetheris-web-<version>.zip`. Unzip it, serve `index.html` as a static
+  site. Netlify, Vercel, GitHub Pages, Cloudflare Pages, S3 and nginx all work
+  with nothing configured; the zip's README says so for whoever deploys it.
+- The single-file inliner now lives in `tools/inline.mjs` and is shared, so the
+  published artifact and the zip cannot drift apart. Its two hard-won rules —
+  keep the bundle's execution timing, splice insertions by index instead of
+  through `String.replace` — are documented where they are implemented.
+- **Loose ends removed:** four stale release pairs, an out-of-date 1.3.0 pair
+  and every `.exe` are deleted from Google Drive. The folder now holds one zip
+  and one html for the current version.
+
 ### 1.5.3 — the game could not start at all from the exe
 - **Fixed the frozen "Awakening" screen.** The .exe opened a window that sat on
   the loading text forever and then said "The game did not start", with no
@@ -312,10 +337,9 @@ the whole game fits in roughly 630 KB of executable payload.
 ```bash
 npm install
 npm run dev            # http://localhost:5173 (live preview)
-npm run build:exe      # → release/Aetheris.exe + release/Aetheris.html
-npm run verify:all     # world, game, shaders, net, online, watchdog, update, updater, e2e
+npm run build:web      # → release/Aetheris.html + release/Aetheris-web-<v>.zip
+npm run verify:all     # world, game, shaders, net, online, watchdog, update, e2e
 npm run verify:update  # the page half of the self-updater
-npm run verify:updater # the launcher half: compiles the real C and drives it
 node tools/publish-release.mjs --dry-run   # validate a build without publishing
 npm run verify         # headless world build smoke test (no GPU needed)
 npm run verify:game    # headless combat/AI/pickup/match/audio simulation test
@@ -324,19 +348,22 @@ npm run verify:e2e     # runs the real bundle in a stub DOM: menu → match → 
 npm run verify:shaders # GLSL syntax check for every shader source
 ```
 
-### How the portable exe is made
+### How the web package is made
 
-1. `vite build` produces one ES bundle.
-2. `tools/build-exe.mjs` inlines the JS and CSS into a single `index.html`
-   (no `import`, no `fetch`, so it runs from `file://`).
-3. `launcher/launcher.c` is cross-compiled to `x86_64-windows-gnu` with Zig —
-   a GUI-subsystem Win32 binary with no runtime dependencies.
-4. The HTML is appended to the stub plus a 24-byte trailer
-   (`"AETHERIS-PAYLOAD"` + payload length). The launcher reads its own file,
-   finds the trailer, and extracts the payload on startup.
+1. `vite build` produces one IIFE bundle plus one stylesheet.
+2. `tools/inline.mjs` folds both into a single `index.html` — no external
+   requests at all, so it runs from `file://` or any static host.
+3. `tools/build-web.mjs` writes that file to `release/Aetheris.html` (the
+   published artifact, committed so it has a stable URL) and packages a zip for
+   deployment.
 
-Requires Zig for the cross-compile (`pip install ziglang --target /tmp/zigpkg`
-or set `ZIG=/path/to/zig`). The web build alone needs nothing but Node.
+The one subtle rule lives in the inliner: a `type="module"` script in `<head>`
+is deferred, and turning it into an inline script would run it before the DOM
+exists. Deferred bundles are relocated to the end of `<body>` instead. Insertions
+are spliced by index, never through `String.replace` — minified code is full of
+`$&`, which a replacement string expands.
+
+Requires nothing but Node and the `zip` command.
 
 ## Layout
 
@@ -364,9 +391,8 @@ src/ui/menu-chrome.js   version badge, change log panel, update line
 src/net/updater.js      release lookup, verified download, staging hand-off
 src/audio/ambience.js   procedural wind + drone
 src/audio/sfx.js        procedural guns, reloads, hits, match stings
-launcher/launcher.c     Win32 launcher, staged-update promotion
-launcher/localserver.c  loopback server: serves the game, receives updates
-tools/build-exe.mjs     single-file packager
+tools/build-web.mjs     web packager: single file + deployable zip
+tools/inline.mjs        shared single-file inliner (timing + escaping rules)
 tools/publish-release.mjs  publishes a build so installed copies update
 docs/RELEASING.md       how an update reaches every existing install
 ```

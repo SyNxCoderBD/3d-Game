@@ -103,7 +103,7 @@ function sourceUrl() {
  */
 function inspectBuild() {
   if (!fs.existsSync(htmlPath)) {
-    fail('release/Aetheris.html is missing — run `npm run build:exe` first');
+    fail('release/Aetheris.html is missing — run `npm run build:web` first');
   }
   const bytes = fs.readFileSync(htmlPath);
   const text = bytes.toString('utf8');

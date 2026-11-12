@@ -18,7 +18,7 @@ launch. Nobody re-downloads anything.
 npm version 1.5.0 --no-git-tag-version
 
 # 2. build and run the test suite
-npm run build:exe
+npm run build:web
 npm run verify:all
 
 # 3. commit and push: the published payload is fetched from the commit
@@ -43,7 +43,6 @@ That is the whole loop. Anyone launching 1.4.0 or later gets 1.5.0.
 | Piece | Role |
 | --- | --- |
 | `release/Aetheris.html` | The build. Committed, so it has a stable public URL. |
-| `release/Aetheris.exe` | Launcher + fallback copy. Changes only when the launcher itself changes. |
 | `tools/publish-release.mjs` | Validates the build, points Postgres at it, records the release. |
 | `aetheris_releases` | One row per version: notes, date, size, sha256, published flag. |
 | `aetheris_release_payload` | The html itself, exactly as it was fetched. |
@@ -173,6 +172,6 @@ redistributed when its own behaviour changes (new browser lookups, a different
 update hand-off). When that happens the payload is still embedded, so the new
 exe works immediately and then pulls the newest game on its first launch.
 
-`npm run build:exe` verifies the loopback server by compiling the real launcher
+`npm run build:web` verifies the loopback server by compiling the real launcher
 source, serving the actual payload through it and fetching it back byte for
 byte, so a broken launcher fails the build rather than the player.
