@@ -1,9 +1,9 @@
 {
   "name": "aetheris",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
-  "description": "AETHERIS \u2014 Island Warfare: split-screen FPS with procedural weapons, characters, bots and loot, shipped as a single portable Windows executable.",
+  "description": "AETHERIS — Island Warfare: split-screen FPS with procedural weapons, characters, bots and loot, shipped as a single portable Windows executable.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

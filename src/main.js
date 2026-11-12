@@ -1246,7 +1246,9 @@ function readLocalInput(f) {
   }
   const input = game.input1.poll(1 / 60);
   if (f.weapon.kind === 'sniper' && f.aimT > 0.5) {
-    const k = 1 - f.aimT * 0.62;
+    // Scale look speed with the zoom: the tighter the scope, the slower the
+    // reticle must move or a small stick nudge throws it off the target.
+    const k = 1 - f.aimT * 0.72;
     input.lookX *= k;
     input.lookY *= k;
   }
@@ -1307,7 +1309,9 @@ function simulate(dt) {
     }
     // Zoomed snipers get proportionally slower look, or the reticle jumps.
     if (f.weapon.kind === 'sniper' && f.aimT > 0.5) {
-      const k = 1 - f.aimT * 0.62;
+      // Scale look speed with the zoom: the tighter the scope, the slower the
+    // reticle must move or a small stick nudge throws it off the target.
+    const k = 1 - f.aimT * 0.72;
       input.lookX *= k;
       input.lookY *= k;
     }

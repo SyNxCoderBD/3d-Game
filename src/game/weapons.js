@@ -62,7 +62,9 @@ export const WEAPONS = {
     range: 220,
     pellets: 1,
     reloadTime: 2.2,
-    adsFov: 50,
+    // A red-dot is not magnified, so this is only a slight pull-in to make the
+    // optic feel like it is being looked through.
+    adsFov: 44,
     kind: 'rifle',
   },
   shotgun: {
@@ -102,7 +104,9 @@ export const WEAPONS = {
     range: 400,
     pellets: 1,
     reloadTime: 3.1,
-    adsFov: 26,
+    // 21 deg against the 78 deg base is ~4.4x. The old 26 deg gave 3.5x, which
+    // read as a mild zoom rather than as a sniper scope.
+    adsFov: 21,
     kind: 'sniper',
   },
 };

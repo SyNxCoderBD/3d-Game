@@ -180,6 +180,28 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.5.0 — the fixes that needed a screenshot
+- **The scope works.** The sniper's teal disc is gone (it was the viewmodel's
+  emissive lens sitting 25 cm from the eye), the reticle is sized to the lens
+  instead of the whole screen, and the zoom is up from 3.5x to 4.4x.
+- **The AR-15 aims.** Its optic was a tube with no rear element, so scoping put
+  your eye inside an unlit cylinder — a black screen. It is a capped red-dot
+  now, with a red-dot overlay while aiming.
+- **Bots have a difficulty**, Easy by default, and Easy is genuinely easy.
+- **Controller aim is usable**: far stronger aim assist, a sensitivity slider,
+  and the stick no longer fights the mouse.
+- **Gamepad for player 1**, in every mode including bot practice.
+- **One controller no longer drives both players** in split-screen.
+- **No more phantom crash cards.** Pointer-lock refusals are retried through the
+  browser's cooldown instead of being reported as fatal errors, and the filter
+  now sits at the choke point rather than in the two error handlers.
+- **The controller stops vanishing.** Detection is latched, so a pad that is
+  plugged in stays detected through the idle periods where the browser hides it.
+- **The sky is smooth.** The dome rebuilt its view direction per fragment; the
+  per-vertex version bent the horizon gradient into visible facets.
+- **Guests leave the lobby** when the host starts, instead of sitting on
+  "waiting" while the match runs without them.
+
 ### 1.4.0 — the game updates itself
 - **New versions install themselves.** The exe is a launcher now, not a
   snapshot: it keeps one copy of the game so it can always start, and on every
