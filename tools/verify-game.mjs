@@ -22,6 +22,8 @@ const { Fighter } = await import('../src/game/fighter.js');
 const { BotBrain } = await import('../src/game/ai.js');
 const { Pickups } = await import('../src/game/pickups.js');
 const { hitscan } = await import('../src/game/combat.js');
+const { WorldColliders } = await import('../src/game/colliders.js');
+const { createProps } = await import('../src/world/vegetation.js');
 const { Match, STREAKS } = await import('../src/game/match.js');
 const { Sfx } = await import('../src/audio/sfx.js');
 const { createWeaponModel, WEAPONS } = await import('../src/game/weapons.js');
@@ -56,6 +58,43 @@ check('spawn points', spawns.length >= 8, `${spawns.length}`);
 const spots = buildPickupSpots(26);
 check('pickup spots', spots.length > 10, `${spots.length}`);
 
+console.log('\n▸ trees as cover');
+const props = createProps();
+const trees = props.colliders.filter((c) => c.kind === 'tree');
+const trunkRadii = trees.map((t) => t.r).sort((a, b) => a - b);
+check('trees expose trunk colliders', trees.length > 500, `${trees.length} trunks, ${props.colliders.length - trees.length} rocks`);
+check('trunks are cover-sized', trunkRadii[trunkRadii.length >> 1] > 0.35 && trunkRadii[trunkRadii.length >> 1] < 1.2,
+  `median radius ${trunkRadii[trunkRadii.length >> 1].toFixed(2)} m`);
+const world = new WorldColliders(props.colliders);
+
+// pick a trunk on level ground and shoot straight through it
+let coverTree = null;
+for (const t of trees) {
+  const a = sampleHeight(t.x + 16, t.z);
+  const b = sampleHeight(t.x - 4, t.z);
+  if (Math.abs(a - b) < 0.8) { coverTree = t; break; }
+}
+const gy = sampleHeight(coverTree.x, coverTree.z);
+const coverHit = world.raycast(
+  { x: coverTree.x + 16, y: gy + 1.6, z: coverTree.z },
+  { x: -1, y: 0, z: 0 },
+  30
+);
+check('bullet stops at the trunk', coverHit.t > 14 && coverHit.t < 16.5, `${coverHit.t.toFixed(2)} m`);
+check('line of sight blocked through the trunk',
+  world.blockedBetween({ x: coverTree.x + 16, y: gy + 1.5, z: coverTree.z },
+                       { x: coverTree.x - (coverTree.r + 0.8), y: gy + 1.3, z: coverTree.z }, 0.4));
+check('line of sight clear beside the trunk',
+  !world.blockedBetween({ x: coverTree.x + 16, y: gy + 1.5, z: coverTree.z },
+                        { x: coverTree.x + 3, y: gy + 1.3, z: coverTree.z + 6 }, 0.4));
+
+// player cannot walk through a trunk
+const probe = new THREE.Vector3(coverTree.x + coverTree.r * 0.2, gy + 1, coverTree.z);
+const resolved = world.pushOut(probe, 0.32);
+check('trunk pushes the player out', resolved > 0 &&
+  Math.hypot(probe.x - coverTree.x, probe.z - coverTree.z) >= coverTree.r + 0.31,
+  `resolved ${resolved}, stand-off ${Math.hypot(probe.x - coverTree.x, probe.z - coverTree.z).toFixed(2)} m`);
+
 console.log('\n▸ pickups');
 const pickups = new Pickups(scene, spots);
 check('pickups spawned', pickups.items.length === spots.length, `${pickups.items.length} items`);
@@ -64,7 +103,7 @@ check('pickup variety', types.size >= 3, [...types].join(', '));
 
 console.log('\n▸ fighters');
 const effects = {
-  tracer() {}, impact() {}, update() {},
+  tracer() {}, impact() {}, update() {}, world,
 };
 
 const cam = new THREE.PerspectiveCamera(78, 1.6, 0.03, 6000);
@@ -197,6 +236,46 @@ check('reload works', p1.slotData.ammo > 0, `mag ${p1.slotData.ammo}/${ammoBefor
 const slotBefore = p1.slot;
 p1.swapWeapon();
 check('weapon swap', p1.slot !== slotBefore, `slot ${p1.slot} → ${p1.slotData.id}`);
+
+// --- bot balance: a stationary player must survive a while
+console.log('\n▸ bot balance');
+function botThreat(skill, seconds) {
+  const sceneB = new THREE.Scene();
+  const fx = { tracer() {}, impact() {}, update() {} };   // no world: open ground
+  const arena = spawns[0];
+  const hy = sampleHeight(arena.position.x, arena.position.z);
+  const p = new Fighter({ id: 'bt-p', name: 'P', scene: sceneB, bodyLayer: 4, viewLayer: 1, palette: 'p1', spawnPoints: spawns });
+  const b = new Fighter({ id: 'bt-b', name: 'B', scene: sceneB, isBot: true, bodyLayer: 0, palette: 'botA', spawnPoints: spawns });
+  p.position.set(arena.position.x, hy + 0.05, arena.position.z);
+  p.alive = true; p.spawnProtect = 0;
+  b.position.set(arena.position.x + 20, sampleHeight(arena.position.x + 20, arena.position.z) + 0.05, arena.position.z + 1);
+  b.alive = true; b.spawnProtect = 0;
+  const brain = new BotBrain(b, spawns, skill);
+  const c = { fighters: [p, b], effects: fx, pickups: null };
+  const still = { forward: 0, strafe: 0, lookX: 0, lookY: 0, jump: false, sprint: false, crouch: false, fire: false, aim: false, reload: false, swap: false, slot: 0, med: false };
+  let firstHit = null, damage = 0;
+  p.onDamage = (a) => { damage += a; if (firstHit === null) firstHit = t / 60; };
+  let shots = 0;
+  const orig = b.tryFire.bind(b);
+  b.tryFire = (cc) => { const before = b.slotData.ammo; orig(cc); if (b.slotData.ammo < before) shots++; };
+  let t = 0;
+  for (; t < seconds * 60; t++) {
+    const ai = brain.update(1 / 60, c);
+    b.update(1 / 60, ai, c);
+    p.update(1 / 60, still, c);
+    p.health = 100; p.alive = true; p.spawnProtect = 0;   // measure output, not deaths
+  }
+  return { firstHit, damage, shots, dps: damage / seconds };
+}
+const br = botThreat(0.85, 20);
+check('bots do not instakill', br.dps < 26, `${br.dps.toFixed(1)} damage/s (old bots ≈ 45)`);
+// Reaction delay is the structural guarantee: even the best bot must "notice"
+// you before it can fire, so this check is deterministic rather than sampled.
+const fastest = new BotBrain(new Fighter({ id: 'rt', name: 'R', scene: new THREE.Scene(), isBot: true, bodyLayer: 0, palette: 'botA', spawnPoints: spawns }), spawns, 1.0);
+check('bots must notice you before firing', fastest.reactionSkill >= 0.3, `${fastest.reactionSkill.toFixed(2)} s reaction at skill 1.0`);
+check('bots ramp their aim in', fastest.acquireRate < 4, `${(1 / fastest.acquireRate).toFixed(2)} s to settle the crosshair`);
+check('bots fire in bursts, not a laser', fastest.burstMax < 0.6, `burst ${fastest.burstMin.toFixed(2)}–${fastest.burstMax.toFixed(2)} s`);
+check('bots still pose a threat', br.shots > 10 && br.damage > 0, `${br.shots} shots, ${br.damage.toFixed(0)} damage`);
 
 // --- three weapon slots
 console.log('\n▸ loadout');

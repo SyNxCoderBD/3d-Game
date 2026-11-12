@@ -314,6 +314,17 @@ function key(code) {
   for (const cb of cbs) cb({ code, repeat: false, preventDefault() {} });
 }
 
+function layerMask(obj) {
+  let mask = 0;
+  obj.traverse((o) => { mask |= o.layers.mask; });
+  return mask;
+}
+function inspectLayers(obj, layer) {
+  let ok = true;
+  obj.traverse((o) => { if (!o.layers.isEnabled(layer)) ok = false; });
+  return ok;
+}
+
 let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => {
   if (cond) { pass++; console.log(`  ✓ ${name}${extra ? ' — ' + extra : ''}`); }
@@ -372,8 +383,39 @@ check('duo HUD has two panes', el('hudRoot').children.length >= 2, `${el('hudRoo
 await runFrames(120, 6);
 check('duo sim is stable', errors.length === 0, errors.slice(0, 2).join(''));
 
-console.log('\n▸ win condition + scoreboard');
 const api = globalThis.window.__aetheris || sandbox.window.__aetheris || sandbox.__aetheris;
+
+console.log('\n▸ rendering config');
+{
+  const three = sandbox.THREE || THREE;
+  // Read the live renderer config through the debug handle.
+  const info = api && api.__inspect ? api.__inspect() : null;
+  check('debug inspect hook available', !!info);
+  if (info) {
+    check('shadowMap.autoUpdate is on', info.shadowAutoUpdate === true);
+    check('shadow camera sees player layers', info.shadowLayers.includes(1) && info.shadowLayers.includes(2));
+  }
+}
+
+console.log('\n▸ two-gun fix');
+if (api) {
+  const [p1, p2] = api.game.locals;
+  const bodyGun = p1.bodyGun;
+  const viewGun = p1.viewGun;
+  check('body gun is on the body layer', inspectLayers(bodyGun, 4), `layers ${layerMask(bodyGun)}`);
+  check('viewmodel gun is on the view layer', inspectLayers(viewGun, 1), `layers ${layerMask(viewGun)}`);
+  const cam1 = api.game.cam1;
+  check('camera 1 sees its own body gun?', cam1.layers.test(bodyGun.children[0]?.layers || bodyGun.layers) === false,
+    'must be invisible to its owner');
+  // swap weapons: both models must follow
+  p1.swapTimer = 0;
+  p1.selectSlot(1);
+  check('body gun swaps with the slot', p1.bodyGun && p1._gunId === p1.weapon.id, p1.weapon.short);
+  check('viewmodel swaps with the slot', p1.viewGun && p1._viewGunId === p1.weapon.id);
+  check('swapped body gun keeps the body layer', inspectLayers(p1.bodyGun, 4));
+}
+
+console.log('\n▸ win condition + scoreboard');
 check('debug handle exposed', !!api);
 if (api) {
   // Force the duel to the score limit and let a frame resolve it.

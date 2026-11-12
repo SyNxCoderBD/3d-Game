@@ -173,6 +173,23 @@ falls back automatically: **hold the left mouse button and drag** to look.
 Everything — geometry, textures, sound — is generated at runtime, which is why
 the whole game fits in roughly 630 KB of executable payload.
 
+## Changelog
+
+### 1.1.1 — cover & balance
+- **Trees are real cover.** Trunks are a little wider with a flared base, they
+  are solid to bullets, bodies and bot line-of-sight, and they are placed with
+  enough room between them (median ~8 m) to fight in.
+- **Fixed the second gun.** The body-held weapon and its muzzle flash were
+  drawn in the owner's own camera, leaving a gun floating under the player.
+  They now live on the body layer only.
+- **Shadows.** The shadow pass was switched off globally and is now live, and
+  every camera layer (including other players' bodies) casts and receives.
+- **Bots are no longer lethal on sight.** They must notice you (0.32–0.78 s
+  reaction), their aim settles in over half a second, they walk fire into
+  targets in short bursts with recoil pauses, and they lose lock when you
+  duck behind a trunk. Measured: 3.6 s to kill you → 7 s or more, and roughly
+  a third of the old damage output.
+
 ## Development
 
 ```bash

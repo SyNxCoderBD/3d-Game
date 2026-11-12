@@ -53,21 +53,42 @@ const LEAF_SETS = [
   [0x3f6b2c, 0x527f38, 0x2b4f1e],
 ];
 
+/*
+ * Trees double as hard cover: the trunk below is a real, solid column that
+ * stops movement, bullets and bot line-of-sight (see game/colliders.js). To
+ * make that readable in-game the trunk is a little wider and slightly
+ * buttressed at the base, and it starts below the ground plane so no root
+ * gap is ever visible on a slope.
+ */
+const TREE_TRUNK_BASE = -0.55;   // sunk into the terrain
+
 function makeTree(variant) {
   const rand = createRandom(1000 + variant * 77);
   const parts = [];
   const leafSet = LEAF_SETS[variant % LEAF_SETS.length];
 
-  const trunkH = 2.9 + rand() * 2.4;
-  const trunkR = 0.17 + rand() * 0.11;
+  const trunkH = 3.4 + rand() * 2.4;
+  const trunkR = 0.30 + rand() * 0.08;
 
-  const trunk = new THREE.CylinderGeometry(trunkR * 0.58, trunkR, trunkH, 6, 1, false);
-  trunk.translate(0, trunkH / 2, 0);
+  const trunk = new THREE.CylinderGeometry(trunkR * 0.62, trunkR * 1.18, trunkH - TREE_TRUNK_BASE, 8, 1, false);
+  trunk.translate(0, (trunkH + TREE_TRUNK_BASE) * 0.5, 0);
   let trunkGeo = trunk.index ? trunk.toNonIndexed() : trunk;
   trunkGeo.deleteAttribute('uv');
-  trunkGeo = deform(trunkGeo, 0.05, 1.4, variant * 3.3);
+  trunkGeo = deform(trunkGeo, 0.04, 1.4, variant * 3.3);
   paint(trunkGeo, C(TRUNK_COLORS[variant % TRUNK_COLORS.length]), 0.22, rand);
   parts.push(trunkGeo);
+
+  // Two root flares so the base reads as planted, not floating.
+  for (let f = 0; f < 2; f++) {
+    const flare = new THREE.CylinderGeometry(trunkR * 0.5, trunkR * 1.9, 0.7, 7, 1, false);
+    const a = (f / 2) * Math.PI * 2 + rand();
+    flare.translate(Math.cos(a) * trunkR * 0.8, 0.05, Math.sin(a) * trunkR * 0.8);
+    let fg = flare.index ? flare.toNonIndexed() : flare;
+    fg.deleteAttribute('uv');
+    paint(fg, C(TRUNK_COLORS[(variant + 1) % TRUNK_COLORS.length]), 0.18, rand);
+    parts.push(fg);
+  }
+
 
   // A full, layered canopy: a big crown plus satellite clusters.
   const blobCount = 4 + (variant % 2);
@@ -452,6 +473,7 @@ export function createProps() {
   const variantGeos = [makeTree(0), makeTree(1), makeTree(2), makeTree(3), makeTree(4)];
   const buckets = variantGeos.map(() => []);
 
+  const trunks = [];
   let treeCount = 0;
   let tries = 0;
   while (treeCount < 860 && tries < 60000) {
@@ -468,14 +490,36 @@ export function createProps() {
     const forest = fbm(nClump, x * 0.0042 + 31, z * 0.0042 - 12, 3) * 0.5 + 0.5;
     if (rand() > forest * 1.55 - 0.28) continue;
 
+    // Leave a small clearing between trunks so each one is usable cover.
+    let crowded = false;
+    for (const t of trunks) {
+      const dx = t.x - x;
+      const dz = t.z - z;
+      if (dx * dx + dz * dz < 3.1 * 3.1) { crowded = true; break; }
+    }
+    if (crowded) continue;
+
     const v = (rand() * variantGeos.length) | 0;
     const s = 0.85 + rand() * 0.95;
+    const sxz = s * (0.9 + rand() * 0.25);
     posv.set(x, h - 0.15, z);
     euler.set((rand() - 0.5) * 0.07, rand() * Math.PI * 2, (rand() - 0.5) * 0.07);
     quat.setFromEuler(euler);
-    scalev.set(s * (0.9 + rand() * 0.25), s * (0.9 + rand() * 0.4), s * (0.9 + rand() * 0.25));
+    const sy = s * (0.9 + rand() * 0.4);
+    scalev.set(sxz, sy, sxz);
     matrix.compose(posv, quat, scalev);
     buckets[v].push({ matrix: matrix.clone(), tint: 0.85 + rand() * 0.35 });
+
+    // Collision column: a touch wider than the visible bark so bullets do not
+    // slip through the model's facet edges.
+    const R = (0.30 + 0.08 * 0.5) * 1.18 * sxz + 0.10;
+    trunks.push({
+      x, z,
+      r: R,
+      y0: h - 3.0,
+      y1: h + Math.min(6.2, (3.4 + 1.2) * sy),
+      kind: 'tree',
+    });
     treeCount++;
   }
 
@@ -526,9 +570,21 @@ export function createProps() {
     posv.set(x, h - s * 0.3, z);
     euler.set(rand() * Math.PI, rand() * Math.PI * 2, rand() * Math.PI);
     quat.setFromEuler(euler);
-    scalev.set(s, s * (0.7 + rand() * 0.5), s * (0.85 + rand() * 0.4));
+    const sy = s * (0.7 + rand() * 0.5);
+    scalev.set(s, sy, s * (0.85 + rand() * 0.4));
     matrix.compose(posv, quat, scalev);
     rockBuckets[v].push({ matrix: matrix.clone(), tint: 0.7 + rand() * 0.55 });
+
+    // Only boulders you can actually crouch behind count as cover.
+    if (s > 1.05) {
+      trunks.push({
+        x, z,
+        r: s * 0.62,
+        y0: h - 2.0,
+        y1: h + sy * 0.95,
+        kind: 'rock',
+      });
+    }
     rockCount++;
   }
 
@@ -604,5 +660,11 @@ export function createProps() {
   bushMesh.frustumCulled = false;
   group.add(bushMesh);
 
-  return { group, treeCount, rockCount, bushCount: bushList.length };
+  return {
+    group,
+    treeCount,
+    rockCount,
+    bushCount: bushList.length,
+    colliders: trunks,
+  };
 }

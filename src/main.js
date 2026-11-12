@@ -12,6 +12,7 @@ import { BotBrain } from './game/ai.js';
 import { Pickups } from './game/pickups.js';
 import { KeyboardMouseInput, GamepadInput, KeyboardSecondInput } from './game/input.js';
 import { Match } from './game/match.js';
+import { WorldColliders } from './game/colliders.js';
 import { Sfx } from './audio/sfx.js';
 import { WEAPONS } from './game/weapons.js';
 import { buildSpawnPoints, buildPickupSpots } from './game/spawns.js';
@@ -58,7 +59,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.shadowMap.autoUpdate = false;
+// The shadow map re-renders every frame: the sun follows the players, so a
+// cached map leaves the world (and the trees) with no shadows at all.
+renderer.shadowMap.autoUpdate = true;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0xbcd7f0, 0.001);
@@ -69,13 +72,17 @@ const menuCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.in
 
 const sun = new THREE.DirectionalLight(0xffffff, 5.2);
 sun.castShadow = true;
+// Fighters are split onto layers 1..4 so each split-screen eye sees the right
+// viewmodel/body. The shadow camera must look at those layers too, or people
+// and their guns cast no shadows.
+for (const layer of [0, 1, 2, 3, 4]) sun.shadow.camera.layers.enable(layer);
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 760;
-sun.shadow.camera.left = -160;
-sun.shadow.camera.right = 160;
-sun.shadow.camera.top = 160;
-sun.shadow.camera.bottom = -160;
+sun.shadow.camera.left = -175;
+sun.shadow.camera.right = 175;
+sun.shadow.camera.top = 175;
+sun.shadow.camera.bottom = -175;
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.035;
 sun.shadow.radius = 2.4;
@@ -99,7 +106,7 @@ hemi.intensity = PRESETS[0].hemiIntensity;
 const worldGroup = new THREE.Group();
 scene.add(worldGroup);
 
-let sky, terrain, water, propsInfo, motes, effects;
+let sky, terrain, water, propsInfo, motes, effects, world;
 let grassP1, grassP2;
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -129,6 +136,9 @@ async function buildWorld() {
   await step(62, 'Planting the forests', () => {
     propsInfo = createProps();
     worldGroup.add(propsInfo.group);
+    // Trunks and boulders become solid: movement collision, bullet blocking
+    // and line-of-sight occlusion all read from here.
+    world = new WorldColliders(propsInfo.colliders);
   });
   await step(80, 'Seeding the meadows', () => {
     grassP1 = createGrass();
@@ -143,6 +153,7 @@ async function buildWorld() {
     motes = createMotes(900, 62);
     scene.add(motes);
     effects = new Effects(scene);
+    if (world) effects.world = world;
   });
   await step(100, 'Ready', () => {});
 }
@@ -953,6 +964,13 @@ try {
       resumeGame,
       quitToMenu,
       get match() { return game.match; },
+      // Lets the headless harness assert renderer/shadow configuration.
+      __inspect: () => ({
+        shadowAutoUpdate: renderer.shadowMap.autoUpdate,
+        shadowLayers: [0, 1, 2, 3, 4].filter((l) => sun.shadow.camera.layers.isEnabled(l)),
+        shadowEnabled: renderer.shadowMap.enabled,
+        colliders: world ? world.items.length : 0,
+      }),
     };
   }
 } catch (_) { /* no location (headless) */ }

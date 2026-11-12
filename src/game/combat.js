@@ -47,9 +47,11 @@ function raySphere(origin, dir, center, radius) {
 
 /**
  * Cast a bullet through the world.
+ * `world` is an optional WorldColliders instance; tree trunks and boulders in
+ * it stop the bullet, which is what makes them usable as cover.
  * Returns { distance, point, victim, headshot, hitTerrain }
  */
-export function hitscan(origin, dir, maxDist, fighters, shooter) {
+export function hitscan(origin, dir, maxDist, fighters, shooter, world = null) {
   let bestDist = maxDist;
   let bestVictim = null;
   let bestHead = false;
@@ -85,6 +87,21 @@ export function hitscan(origin, dir, maxDist, fighters, shooter) {
       bestDist = bodyD;
       bestVictim = f;
       bestHead = false;
+    }
+  }
+
+  // Solid props (trunks, big rocks) block the bullet and the fighters behind them.
+  let propD = -1;
+  if (world) {
+    const hit = world.raycast(origin, dir, Math.min(bestDist, maxDist));
+    if (hit.t < Math.min(bestDist, maxDist)) {
+      propD = hit.t;
+      if (bestVictim) {
+        // A fighter further away than the trunk is behind cover.
+        bestVictim = null;
+        bestHead = false;
+      }
+      bestDist = Math.min(bestDist, propD);
     }
   }
 
@@ -135,6 +152,7 @@ const BLOOD_GEO = new THREE.SphereGeometry(0.035, 6, 5);
 export class Effects {
   constructor(scene) {
     this.scene = scene;
+    this.world = null;   // set by main once the props are built
 
     this.tracerMat = new THREE.MeshBasicMaterial({
       color: 0xffd98a, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,

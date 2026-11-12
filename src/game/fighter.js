@@ -16,7 +16,7 @@ function setLayersDeep(obj, layer) {
   obj.traverse((o) => o.layers.set(layer));
 }
 
-function attachFlash(gunModel) {
+function attachFlash(gunModel, layer = null) {
   const muzzle = weaponMuzzle(gunModel);
   if (!muzzle) return null;
   const group = new THREE.Group();
@@ -35,6 +35,9 @@ function attachFlash(gunModel) {
   }
   group.visible = false;
   muzzle.add(group);
+  // The flash is attached after the gun's layer pass, so it must be assigned
+  // explicitly: a layer-0 flash would be drawn by every camera.
+  if (layer !== null) setLayersDeep(group, layer);
   return group;
 }
 
@@ -48,10 +51,11 @@ export class Fighter {
     this.spawnPoints = opts.spawnPoints || [];
     this.respawnDelay = opts.respawnDelay ?? 3.2;
 
+    this.bodyLayer = opts.bodyLayer ?? 0;
     this.rig = createCharacter(opts.palette, opts.accent);
     this.bodyAnchor = new THREE.Group();
     this.bodyAnchor.add(this.rig.root);
-    setLayersDeep(this.bodyAnchor, opts.bodyLayer ?? 0);
+    setLayersDeep(this.bodyAnchor, this.bodyLayer);
     this.scene.add(this.bodyAnchor);
 
     this.position = new THREE.Vector3(0, 40, 0);
@@ -131,23 +135,33 @@ export class Fighter {
 
   refreshWeaponModels(force = false) {
     const id = this.weapon.id;
-    if (!force && this._gunId === id && this.bodyGun) return;
-    this._gunId = id;
-    if (this.bodyGun) {
-      this.rig.gunMount.remove(this.bodyGun);
-      this.bodyGun = null;
-    }
-    this.bodyGun = createWeaponModel(this.weapon.id);
-    this.bodyGun.position.set(0, 0, 0);
-    this.rig.gunMount.add(this.bodyGun);
-    this.bodyMuzzleFlash = attachFlash(this.bodyGun);
+    const needsBody = !this.bodyGun || this._gunId !== id;
+    const needsView = !!this.viewPivot && (!this.viewGun || this._viewGunId !== id);
+    if (!force && !needsBody && !needsView) return;
 
-    if (this.viewPivot) {
+    if (force || !this.bodyGun || this._gunId !== id) {
+      if (this.bodyGun) {
+        this.rig.gunMount.remove(this.bodyGun);
+        this.bodyGun = null;
+      }
+      // The body gun belongs to the character rig: it must sit on the same
+      // layer as the body, or the owner's own camera renders it as a second
+      // gun floating at chest height.
+      this.bodyGun = createWeaponModel(this.weapon.id);
+      this.bodyGun.position.set(0, 0, 0);
+      setLayersDeep(this.bodyGun, this.bodyLayer);
+      this.rig.gunMount.add(this.bodyGun);
+      this.bodyMuzzleFlash = attachFlash(this.bodyGun, this.bodyLayer);
+      this._gunId = id;
+    }
+
+    if (this.viewPivot && (force || !this.viewGun || this._viewGunId !== id)) {
       if (this.viewGun) this.viewPivot.remove(this.viewGun);
       this.viewGun = createWeaponModel(this.weapon.id);
-      this.viewFlash = attachFlash(this.viewGun);
       setLayersDeep(this.viewGun, this.viewLayer);
+      this.viewFlash = attachFlash(this.viewGun, this.viewLayer);
       this.viewPivot.add(this.viewGun);
+      this._viewGunId = id;
     }
   }
 
@@ -388,6 +402,17 @@ export class Fighter {
     this.velocity.x = damp(this.velocity.x, dx * speed, accel, dt);
     this.velocity.z = damp(this.velocity.z, dz * speed, accel, dt);
 
+    // Solid world props: trunks and boulders block movement.
+    const world = ctx?.effects?.world;
+    if (world) {
+      const hit = world.pushOut(this.position, 0.32);
+      if (hit > 0) {
+        // Kill the velocity component into the obstacle so you slide along it.
+        this.velocity.x *= 0.45;
+        this.velocity.z *= 0.45;
+      }
+    }
+
     if (this.swimming) {
       const surface = WORLD.waterLevel + 0.5;
       this.velocity.y = damp(this.velocity.y, (surface - this.position.y) * 3.4, 6, dt);
@@ -621,7 +646,7 @@ export class Fighter {
       dir.z += (Math.random() - 0.5) * totalSpread * 2;
       dir.normalize();
 
-      const hit = hitscan(origin, dir, def.range, ctx.fighters, this);
+      const hit = hitscan(origin, dir, def.range, ctx.fighters, this, ctx.effects?.world);
 
       if (hit.victim) {
         const falloff = 1 - clamp((hit.distance - 25) / (def.range * 1.4), 0, 0.55);

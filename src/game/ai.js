@@ -14,8 +14,13 @@ function angleDelta(from, to) {
   return d;
 }
 
-/** Rough line-of-sight test against the terrain. */
-function canSee(from, to) {
+/**
+ * Line of sight. A bot only sees a target when the terrain *and* the solid
+ * world props (tree trunks, boulders) are clear — that is what makes cover
+ * work against them.
+ */
+function canSee(from, to, world) {
+  if (world && world.blockedBetween(from, to, 0.4)) return false;
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const dz = to.z - from.z;
@@ -40,6 +45,7 @@ export class BotBrain {
     this.retarget = 0;
     this.aimError = 0;
     this.aimErrorVel = 0;
+    this.aimDrift = 0;
     this.burst = 0;
     this.burstCooldown = 0;
     this.strafeDir = Math.random() < 0.5 ? -1 : 1;
@@ -51,6 +57,21 @@ export class BotBrain {
     this.stuckTimer = 0;
     this.lastPos = { x: 0, z: 0 };
     this.slotTimer = 0;
+
+    // Reaction and accuracy state. Bots do not snap onto a target: they take
+    // a moment to notice it, then their aim settles in over a beat or two.
+    this.reaction = 0;          // seconds left before the bot may shoot
+    this.acquire = 0;           // how settled the aim is, 0..1
+    this.lastSeen = 0;          // grace period with a known target
+    this.fireDiscipline = 0.6 + Math.random() * 0.7;
+    // These are re-derived from skill every update; defaults describe skill 0.
+    this.reactionSkill = Math.max(0.32, 0.78 - skill * 0.32);
+    this.acquireRate = 2.1 + skill * 1.5;
+    this.burstMin = 0.16;
+    this.burstMax = 0.16 + 0.26;
+    this.recoilPause = 0;       // forced trigger release after a burst
+    this.lostTargetAt = -99;
+    this.coverHint = 0;
   }
 
   /**
@@ -99,26 +120,57 @@ export class BotBrain {
     this.think -= dt;
     this.strafeTimer -= dt;
 
+    const world = ctx.effects?.world || null;
     if (this.retarget <= 0) {
-      this.retarget = 0.35;
+      // Slower scanning than before: bots used to re-acquire every 0.35 s.
+      this.retarget = 0.5;
       let best = null;
       let bestDist = Infinity;
       for (const other of ctx.fighters) {
         if (other === f || !other.alive) continue;
         const d = other.position.distanceTo(f.position);
-        if (d < bestDist && d < 110) {
+        if (d < bestDist && d < 95) {
           if (canSee(
             { x: f.position.x, y: f.position.y + 1.5, z: f.position.z },
-            { x: other.position.x, y: other.position.y + 1.3, z: other.position.z }
+            { x: other.position.x, y: other.position.y + 1.3, z: other.position.z },
+            world
           )) {
             best = other;
             bestDist = d;
           }
         }
       }
+      if (best && best !== this.target) {
+        // Fresh target: take a visible beat to react. Closing the distance
+        // shortens it, so an ambush still feels dangerous.
+        this.reactionSkill = Math.max(0.32, 0.78 - this.skill * 0.32);
+        this.reaction = this.reactionSkill;
+        this.acquire = 0;
+        this.fireDiscipline = 0.55 + Math.random() * 0.8;
+      }
       this.target = best;
     }
 
+    this.reaction -= dt;
+    // Cover check runs every frame against the current target: stepping
+    // behind a trunk forces the bot to lose lock and re-acquire afterwards.
+    if (this.retarget > 0.4 && this.target && this.target.alive) {
+      const clear = canSee(
+        { x: f.position.x, y: f.position.y + 1.5, z: f.position.z },
+        { x: this.target.position.x, y: this.target.position.y + 1.3, z: this.target.position.z },
+        world
+      );
+      if (!clear) {
+        this.retarget = 0;
+        this.reaction = Math.max(this.reaction, 0.35);
+      }
+    }
+    const seen = !!(this.target && this.target.alive);
+    if (seen) this.lastSeen = 0.9;
+    else this.lastSeen -= dt;
+
+    // Lost sight for good: forget the target so they have to find you again.
+    if (!seen && this.lastSeen <= 0) this.target = null;
     const target = this.target && this.target.alive ? this.target : null;
 
     // ---- aiming -------------------------------------------------------
@@ -137,13 +189,23 @@ export class BotBrain {
       desiredYaw = Math.atan2(-dx, -dz);
       desiredPitch = Math.atan2(dy, dist);
 
-      // Wobble that fades as the bot settles on the target.
-      this.aimErrorVel += (Math.random() - 0.5) * dt * (1.6 - this.skill);
-      this.aimErrorVel *= Math.exp(-3 * dt);
-      this.aimError = clamp(this.aimError + this.aimErrorVel, -0.14, 0.14) * (1.15 - this.skill);
+      // Aim settles over ~0.55 s instead of snapping on.
+      this.acquire = Math.min(1, this.acquire + dt * this.acquireRate);
+
+      // A real aim cone: it starts wide while the bot is still "finding" the
+      // target, narrows as it settles, and opens up again while firing.
+      const freshness = 1.55 - this.acquire * 1.05;
+      const kick = this.recoilPause > 0 ? 1.35 : 1;
+      const drift = (0.34 - this.skill * 0.16) * freshness * kick;
+      // Low-frequency wander + per-frame jitter: reads as human aim, not noise.
+      this.aimDrift += (Math.random() - 0.5) * dt * drift * 2.4;
+      this.aimDrift *= Math.exp(-2.2 * dt);
+      this.aimErrorVel += (Math.random() - 0.5) * dt * drift * 1.6;
+      this.aimErrorVel *= Math.exp(-3.4 * dt);
+      this.aimError = clamp(this.aimError + this.aimErrorVel + this.aimDrift * dt, -0.042, 0.042);
     }
 
-    const turnRate = 3.2 + this.skill * 4;
+    const turnRate = 2.1 + this.skill * 3.2;
     const yawDelta = angleDelta(f.yaw, desiredYaw + this.aimError);
     const pitchDelta = clamp(desiredPitch - f.pitch, -0.5, 0.5);
 
@@ -160,13 +222,14 @@ export class BotBrain {
         this.strafeDir *= -1;
         this.strafeTimer = 0.9 + Math.random() * 1.4;
       }
-      out.strafe = this.strafeDir * (0.7 + Math.random() * 0.2);
+      out.strafe = this.strafeDir * (0.55 + Math.random() * 0.2);
 
       if (dist > 34) out.forward = 1;
       else if (dist < 9) out.forward = -1;
       else out.forward = Math.sin(this.think * 2) > 0.6 ? 1 : 0;
 
       out.sprint = dist > 45;
+      out.aim = dist > 12 && aimAligned && this.reaction <= 0;
 
       // ---- weapon choice ----------------------------------------------
       this.slotTimer -= dt;
@@ -176,7 +239,10 @@ export class BotBrain {
       }
 
       // ---- shooting ---------------------------------------------------
-      const wantFire = aimAligned && dist < f.weapon.range + 10 && f.slotData.ammo > 0;
+      this.recoilPause -= dt;
+      const settled = this.acquire > 0.55;
+      const wantFire = this.reaction <= 0 && settled && this.recoilPause <= 0 &&
+        aimAligned && dist < f.weapon.range + 10 && f.slotData.ammo > 0;
       if (f.slotData.ammo === 0) {
         // Grab a loaded gun rather than standing still reloading under fire.
         const loaded = f.slots.some((s2, i2) => i2 !== f.slot && s2 && s2.ammo > 0);
@@ -186,8 +252,13 @@ export class BotBrain {
 
       this.burstCooldown -= dt;
       if (wantFire && this.burstCooldown <= 0) {
-        this.burst = 0.18 + Math.random() * 0.35;
-        this.burstCooldown = 0.45 + (1 - this.skill) * 0.9 + Math.random() * 0.4;
+        // Short bursts, then a real pause to recover from recoil. Low-skill
+        // bots spray less and pause longer.
+        this.burstMin = 0.16;
+        this.burstMax = 0.16 + 0.26 * this.fireDiscipline;
+        this.burst = this.burstMin + Math.random() * (this.burstMax - this.burstMin);
+        this.burstCooldown = (0.34 + (1 - this.skill) * 0.85) * this.fireDiscipline + Math.random() * 0.35;
+        this.recoilPause = 0.06 + Math.random() * 0.10 * (1 - this.skill);
       }
       if (this.burst > 0) {
         this.burst -= dt;
