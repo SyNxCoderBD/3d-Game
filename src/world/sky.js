@@ -3,9 +3,16 @@ import { U } from './environment.js';
 import { SKY_UNIFORMS_GLSL, SKY_FUNCTION_GLSL } from './sky-glsl.js';
 
 const vertexShader = /* glsl */`
-varying vec3 vDir;
+// The view direction is passed as the raw local position and normalised per
+// fragment. Normalising it here instead makes the GPU interpolate a *unit*
+// vector across each triangle, which is not the same direction as the one to
+// the interpolated point: on a 48x32 sphere that error is large enough to bend
+// the horizon gradient into visible facets, which read as a giant hard-edged
+// disc across the sky.
+varying vec3 vLocal;
+
 void main() {
-  vDir = normalize(position);
+  vLocal = position;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -14,7 +21,7 @@ const fragmentShader = /* glsl */`
 precision highp float;
 ${SKY_UNIFORMS_GLSL}
 uniform float uTime;
-varying vec3 vDir;
+varying vec3 vLocal;
 
 ${SKY_FUNCTION_GLSL}
 
@@ -40,7 +47,7 @@ float fbm2(vec2 p) {
 }
 
 void main() {
-  vec3 d = normalize(vDir);
+  vec3 d = normalize(vLocal);
   vec3 col = skyBase(d);
 
   // ---- cloud deck -------------------------------------------------------
@@ -72,7 +79,7 @@ void main() {
 `;
 
 export function createSky(radius = 5200) {
-  const geometry = new THREE.SphereGeometry(radius, 48, 32);
+  const geometry = new THREE.SphereGeometry(radius, 64, 40);
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime,

@@ -49,11 +49,11 @@ export class KeyboardMouseInput {
       this.locked = document.pointerLockElement === this.dom;
       if (!this.locked && this.lookMode === 'lock') this.onLockLost?.();
     });
-    document.addEventListener('pointerlockerror', () => {
-      if (this.lookMode === 'lock') {
-        this.lookMode = 'drag';
-        this.onFallbackMode?.();
-      }
+    document.addEventListener('pointerlockerror', (e) => {
+      // The event carries no detail; requestLock's rejection handler is the one
+      // that decides. Swallow it so it cannot bubble to the window error
+      // handler, which would show a fatal card over a running game.
+      e.preventDefault?.();
     });
 
     this.dom.addEventListener('mousedown', (e) => {
@@ -78,17 +78,68 @@ export class KeyboardMouseInput {
     });
   }
 
+  /**
+   * Ask for pointer lock, tolerating every way the browser can refuse.
+   *
+   * Pointer lock is rejected routinely and for ordinary reasons: the request
+   * came too soon after the user pressed Escape ("cannot be acquired
+   * immediately after the user has exited the lock"), the page is not focused,
+   * or the document is not a valid lock target. None of those are faults, but
+   * the browser reports them by *rejecting a promise*, and an unhandled
+   * rejection reaches the page's error handler and paints a fatal card over a
+   * game that is running perfectly well.
+   *
+   * So: every call is caught, failures fall back rather than escalate, and a
+   * rejection right after Escape simply waits instead of forcing drag-look on
+   * a player who is about to click back in.
+   */
   requestLock() {
-    try {
-      const p = this.dom.requestPointerLock?.({ unadjustedMovement: true });
-      if (p && typeof p.catch === 'function') {
-        p.catch(() => {
-          try { this.dom.requestPointerLock(); } catch (_) { this.lookMode = 'drag'; }
-        });
+    // Both attempts are chained through one helper so neither can leave a
+    // rejected promise unobserved: a second unhandled rejection while retrying
+    // the fallback would produce exactly the error card this is meant to stop.
+    const attempt = (opts, onFail) => {
+      let p;
+      try {
+        p = opts ? this.dom.requestPointerLock?.(opts) : this.dom.requestPointerLock?.();
+      } catch (_) {
+        onFail();
+        return;
       }
-    } catch (_) {
-      try { this.dom.requestPointerLock(); } catch (__) { this.lookMode = 'drag'; }
+      if (p && typeof p.then === 'function') {
+        p.then(
+          () => { this.lockError = null; },
+          (err) => onFail(err)
+        );
+      }
+    };
+
+    const fallback = () => {
+      attempt(null, () => { this.lookMode = 'drag'; });
+    };
+
+    attempt({ unadjustedMovement: true }, (err) => this._onLockFailed(err, fallback));
+  }
+
+  /**
+   * A rejected lock is not a crash. Escape-to-pause then click-to-resume is the
+   * normal way to play, and Chrome enforces a short cooldown after Escape; in
+   * that window the correct response is to stay paused and let the player click
+   * again, not to switch input modes or report an error.
+   */
+  _onLockFailed(err, fallback) {
+    const name = err?.name || '';
+    const message = String(err?.message || '');
+    const tooSoon = name === 'SecurityError' || /exited the lock|not valid for pointer lock/i.test(message);
+    this.lockError = message || name || 'pointer lock refused';
+
+    if (tooSoon) {
+      // Keep 'lock' mode: one more click retries it. Switching modes here would
+      // silently turn every mouse-look into a drag, which is not what the player
+      // asked for and cannot be undone without a reload.
+      this.onLockRefused?.();
+      return;
     }
+    fallback();
   }
 
   poll() {
@@ -168,6 +219,92 @@ export class KeyboardSecondInput {
     this.pulses.reload = 0;
     this.pulses.swap = 0;
     this.pulses.med = 0;
+    return out;
+  }
+}
+
+/**
+ * Player 1 with both a keyboard/mouse and a controller.
+ *
+ * The mouse keeps priority for looking — it is the finer instrument, and a
+ * resting stick must never fight it — while movement, firing and the weapon
+ * buttons accept whichever device is actually being used. A stick at rest
+ * contributes nothing, so switching between the two mid-match just works and
+ * neither device has to be plugged in at a particular moment.
+ *
+ * This is what makes bot practice playable on a pad: before this, Player 1 was
+ * keyboard-only and a controller only ever drove Player 2.
+ */
+export class HybridInput {
+  constructor(kbm, pad, { mousePriorityMs = 900 } = {}) {
+    this.kbm = kbm;
+    this.pad = pad;
+    this.mousePriorityMs = mousePriorityMs;
+    this.enabled = false;
+    // -Infinity, not 0: performance.now() starts near zero, so a zero
+    // timestamp would read as "the mouse moved a moment ago" on the very first
+    // frame and the stick would be ignored until the player touched the mouse.
+    this.lastMouseAt = -Infinity;
+    this._wasEnabledKbm = false;
+    this._wasEnabledPad = false;
+  }
+
+  get dom() { return this.kbm.dom; }
+  get locked() { return this.kbm.locked; }
+  get lookMode() { return this.kbm.lookMode; }
+  get connected() { return this.pad.connected; }
+
+  set enabled(v) {
+    this._enabled = v;
+    this.kbm.enabled = v;
+    this.pad.enabled = v && this.pad.connected;
+  }
+  get enabled() { return !!this._enabled; }
+
+  get onLockLost() { return this.kbm.onLockLost; }
+  set onLockLost(fn) { this.kbm.onLockLost = fn; }
+  get onFallbackMode() { return this.kbm.onFallbackMode; }
+  set onFallbackMode(fn) { this.kbm.onFallbackMode = fn; }
+  get onLockRefused() { return this.kbm.onLockRefused; }
+  set onLockRefused(fn) { this.kbm.onLockRefused = fn; }
+
+  requestLock() { this.kbm.requestLock(); }
+  rumble(...args) { this.pad.rumble(...args); }
+
+  /** Was the mouse the device driving the camera within `ms`? */
+  mouseActive(ms = 1200) {
+    return performance.now() - this.lastMouseAt < ms;
+  }
+
+  poll(dt = 1 / 60) {
+    const m = this.kbm.poll();
+    // Keep the pad in sync with hot-plugging without resetting its edge state.
+    this.pad.enabled = this.enabled && this.pad.connected;
+    const g = this.pad.poll(dt);
+
+    if (m.lookX || m.lookY) this.lastMouseAt = performance.now();
+    const mouseFresh = performance.now() - this.lastMouseAt < this.mousePriorityMs;
+
+    const out = {
+      forward: m.forward || g.forward,
+      strafe: m.strafe || g.strafe,
+      // Mouse wins the look while it is being moved; otherwise the stick drives.
+      lookX: mouseFresh ? m.lookX : (g.lookX || m.lookX),
+      lookY: mouseFresh ? m.lookY : (g.lookY || m.lookY),
+      jump: m.jump || g.jump,
+      sprint: m.sprint || g.sprint,
+      crouch: m.crouch || g.crouch,
+      fire: m.fire || g.fire,
+      aim: m.aim || g.aim,
+      reload: m.reload || g.reload,
+      swap: m.swap || g.swap,
+      slot: g.slot || m.slot,
+      med: m.med || g.med,
+    };
+    // Movement adds rather than picks, so a half-pushed stick plus a key does
+    // not cancel out.
+    out.forward = Math.max(-1, Math.min(1, m.forward + g.forward));
+    out.strafe = Math.max(-1, Math.min(1, m.strafe + g.strafe));
     return out;
   }
 }

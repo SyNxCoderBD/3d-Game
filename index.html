@@ -146,6 +146,9 @@
   #roomPingLine.ok { color: #ffd166; }
   #roomPingLine.bad { color: #ff8a7a; }
   .roomError { min-height: 16px; margin: 10px 0 0; font-size: 9.5px; letter-spacing: 0.18em; color: #ff8a7a; text-transform: uppercase; }
+  /* Same slot, but a hint rather than a failure: copying the room code is a
+     convenience, and being told to press Ctrl+C is not an error. */
+  .roomError.note { color: #7ef7e4; }
   .roomHint { margin: 10px 0 0; font-size: 9px; letter-spacing: 0.16em; color: #6b7f76; }
 
   .controlsGrid {
@@ -279,9 +282,53 @@
     /* Everything outside the lens is blacked out, in any pane shape. */
     box-shadow: inset 0 0 70px rgba(0,0,0,0.8), 0 0 0 200vmax #000;
   }
-  .scope-cross { position: absolute; background: rgba(12, 18, 14, 0.9); }
-  .scope-cross.v { left: 50%; top: 50%; width: 1px; height: 200%; transform: translate(-50%, -50%); }
-  .scope-cross.h { left: 50%; top: 50%; width: 200%; height: 1px; transform: translate(-50%, -50%); }
+  /*
+   * The scope reticle. Both rings are centred on the pane, which is the one
+   * point the bullet actually leaves from, so the centre has to be readable
+   * against sky, grass and water alike. Pure dark lines vanish over trees and
+   * pure light lines vanish over the sky, so each line is drawn twice: a wide
+   * soft halo underneath and a thin bright core on top.
+   */
+  .scope-cross { position: absolute; pointer-events: none; }
+  .scope-cross.v {
+    left: 50%; top: 50%; width: 3px; height: 100%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(180deg,
+      rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.55) 44%,
+      transparent 44%, transparent 56%,
+      rgba(0,0,0,0.55) 56%, rgba(0,0,0,0.55) 100%);
+  }
+  .scope-cross.h {
+    left: 50%; top: 50%; width: 100%; height: 3px;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(90deg,
+      rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.55) 44%,
+      transparent 44%, transparent 56%,
+      rgba(0,0,0,0.55) 56%, rgba(0,0,0,0.55) 100%);
+  }
+  .scope-cross.v::after,
+  .scope-cross.h::after {
+    content: ''; position: absolute; background: rgba(235, 255, 248, 0.92);
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.95);
+  }
+  .scope-cross.v::after { left: 50%; top: 0; bottom: 0; width: 1px; transform: translateX(-50%); }
+  .scope-cross.h::after { top: 50%; left: 0; right: 0; height: 1px; transform: translateY(-50%); }
+
+  /* The exact aim point: a small ring with a centre dot, plus a gap in the
+     crosshair so the target is never covered by the reticle itself. */
+  .scope-dot {
+    position: absolute; left: 50%; top: 50%; width: 14px; height: 14px;
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 1px solid rgba(235, 255, 248, 0.55);
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.9), inset 0 0 4px rgba(0, 0, 0, 0.75);
+  }
+  .scope-dot::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 2px; height: 2px;
+    margin: -1px 0 0 -1px; border-radius: 50%; background: #ff4d43;
+    box-shadow: 0 0 5px rgba(255, 50, 40, 0.95);
+  }
+  .scope-label,
+  .scope-mildots { z-index: 2; }
   .scope-mildots { position: absolute; left: 50%; top: 62%; transform: translate(-50%, 0); display: flex; flex-direction: column; gap: 7vh; }
   .scope-mildots i { width: 3px; height: 3px; background: rgba(12,18,14,0.8); border-radius: 50%; }
   .scope-mildots i:nth-child(odd) { transform: translateX(-16px); }
@@ -382,8 +429,14 @@
   .topline .ping.bad { color: #ff8a7a; }
   .topline .ping:empty { display: none; }
 
+  /*
+   * Bigger than it was: at 132 px the weapon dots, the loot dots and the enemy
+   * blip all landed within a couple of pixels of each other, which read as one
+   * smudged ring rather than as "there is someone north-east of you". The
+   * canvas backing store scales with it, so it is not just a stretched bitmap.
+   */
   .minimap {
-    position: absolute; top: 14px; right: 16px; width: 132px; height: 132px;
+    position: absolute; top: 14px; right: 16px; width: 168px; height: 168px;
     border-radius: 50%; overflow: visible;
     border: 1px solid rgba(126, 247, 228, 0.35);
     box-shadow: 0 0 22px rgba(0,0,0,0.65), inset 0 0 18px rgba(0,0,0,0.5);
@@ -529,7 +582,7 @@
         <div class="modeCard" id="btnSolo">
           <h2>1P · BOT PRACTICE</h2>
           <p>Drop into the island alone against ruthless AI squads. Loot rifles, shotguns, armour and med kits — last one standing wins the firefight.</p>
-          <span class="kbd">KEYBOARD + MOUSE</span>
+          <span class="kbd">KEYBOARD + MOUSE &nbsp;·&nbsp; OR A CONTROLLER</span>
           <div>
             <select id="botCount">
               <option value="2">2 BOTS</option>
@@ -564,12 +617,17 @@
 
       <div class="controlsGrid">
         <div>
-          <h3>PLAYER 1 — KEYBOARD + MOUSE</h3>
+          <h3>PLAYER 1 — KEYBOARD + MOUSE OR CONTROLLER</h3>
           <div><span>WASD</span> <i>move</i> &nbsp; <span>MOUSE</span> <i>look</i></div>
           <div><span>LMB</span> <i>fire</i> &nbsp; <span>RMB</span> <i>aim</i> &nbsp; <span>R</span> <i>reload</i></div>
           <div><span>SHIFT</span> <i>sprint</i> &nbsp; <span>SPACE</span> <i>jump</i> &nbsp; <span>CTRL</span> <i>crouch</i></div>
           <div><span>Q</span> <i>med kit</i> &nbsp; <span>F</span> <i>swap</i> &nbsp; <span>1 2 3</span> <i>weapon slots</i></div>
           <div><span>T</span> <i>time of day</i> &nbsp; <span>M</span> <i>mute</i> &nbsp; <span>ESC</span> <i>pause</i></div>
+          <div style="margin-top:10px"><h3>PLAYER 1 — CONTROLLER (ANY MODE)</h3></div>
+          <div><span>STICKS</span> <i>move / look</i> &nbsp; <span>RT</span> <i>fire</i> &nbsp; <span>LT</span> <i>aim</i></div>
+          <div><span>A</span> <i>jump</i> &nbsp; <span>X</span> <i>reload</i> &nbsp; <span>B / RB</span> <i>swap</i></div>
+          <div><span>LB</span> <i>sprint</i> &nbsp; <span>R3</span> <i>crouch</i> &nbsp; <span>Y</span> <i>med kit</i></div>
+          <div><span>D-PAD</span> <i>weapon slots</i> &nbsp; <span>STICK</span> <i>aim assist when you use it</i></div>
         </div>
         <div>
           <h3>PLAYER 2 — CONTROLLER</h3>

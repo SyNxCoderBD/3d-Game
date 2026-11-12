@@ -10,7 +10,7 @@ import { Effects } from './game/combat.js';
 import { Fighter, REGEN_DELAY } from './game/fighter.js';
 import { BotBrain } from './game/ai.js';
 import { Pickups } from './game/pickups.js';
-import { KeyboardMouseInput, GamepadInput, KeyboardSecondInput } from './game/input.js';
+import { KeyboardMouseInput, GamepadInput, KeyboardSecondInput, HybridInput } from './game/input.js';
 import { Match } from './game/match.js';
 import { WorldColliders } from './game/colliders.js';
 import { TargetOutline } from './game/outline.js';
@@ -32,11 +32,31 @@ function fatal(message) {
   el.querySelector('.msg').textContent = message;
   el.classList.add('show');
 }
+/*
+ * Pointer lock is the one browser API this game leans on that refuses
+ * routinely: the lock cannot be taken immediately after the user pressed
+ * Escape, and some documents are not valid lock targets at all. Those are
+ * normal conditions, not faults, and showing "something went wrong" over a
+ * perfectly healthy match is worse than the condition itself.
+ *
+ * The whole flow is handled where it happens (see KeyboardMouseInput), so by
+ * the time anything reaches this far it is already a duplicate. Never let it
+ * paint the fatal card.
+ */
+function isPointerLockNoise(e) {
+  const text = String(
+    (e && (e.reason?.message || e.reason)) || (e && (e.error?.message || e.message)) || ''
+  );
+  return /pointer lock|pointerlock/i.test(text);
+}
+
 window.addEventListener('error', (e) => {
+  if (isPointerLockNoise(e)) return;
   console.error(e.error || e.message);
   fatal(e.message || 'Unknown error');
 });
 window.addEventListener('unhandledrejection', (e) => {
+  if (isPointerLockNoise(e)) return;
   console.error(e.reason);
   fatal(e.reason && e.reason.message ? e.reason.message : String(e.reason));
 });
@@ -258,6 +278,12 @@ function clearMatch() {
 }
 
 /** Attach every feedback hook a fighter can fire. `idx` is its HUD pane. */
+// Player 1's controller, created with the rest of the input devices and kept
+// at module scope because the per-frame loops (readLocalInput, driveLocal) need
+// it to decide whether aim assist applies. Declaring it inside startMatch()
+// made those call sites throw a ReferenceError on the first frame of a match.
+let p1pad = null;
+
 function wireFighter(f, idx) {
   const match = game.match;
 
@@ -371,6 +397,12 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
       palette: 'p1', spawnPoints: game.spawnPoints,
     });
     p1.inputSource = 'kbm';
+    // Aim assist follows the device, not the slot: a controller is a controller
+    // whichever player is holding it. Resolved every frame (see driveLocal), so
+    // a mouse player never gets it and a pad player never loses it by plugging
+    // in after the match started.
+    p1.aimAssist = false;
+    p1.assistFromPad = true;
     game.fighters.push(p1);
     game.locals.push(p1);
   }
@@ -415,6 +447,8 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
     });
     me.inputSource = 'kbm';
     me.isOnlineLocal = true;
+    me.assistFromPad = true;   // resolved per frame in the online loop
+    me.aimAssist = false;
     game.fighters.push(me);
     game.locals.push(me);
     sess.localFighter = me;
@@ -477,12 +511,29 @@ function startMatch(mode, botCount = 4, killLimit = 15) {
   }
 
   // --- local input (every mode; online included)
-  game.input1 = new KeyboardMouseInput(canvas);
+  /*
+   * Player 1 accepts a controller as well as the keyboard and mouse. A pad is
+   * merged in automatically whenever one is connected, so bot practice (and the
+   * duels) can be played entirely on a controller without choosing a mode or
+   * replugging anything. The mouse still owns looking while it is being moved.
+   */
+  const kbm = new KeyboardMouseInput(canvas);
+  p1pad = new GamepadInput(0);
+  game.input1 = new HybridInput(kbm, p1pad);
   game.input1.enabled = true;
   game.input1.onLockLost = () => {
-    if (game.input1.lookMode === 'lock' && game.running && !game.over) pauseGame();
+    // A controller player has no pointer to lose; only pause when the mouse was
+    // the thing driving the camera.
+    if (game.input1.lookMode === 'lock' && game.running && !game.over && !p1pad?.connected) pauseGame();
   };
   game.input1.onFallbackMode = () => hud.toast(0, 'HOLD LEFT MOUSE TO LOOK');
+  // Refused because of the post-Escape cooldown: stay paused, say why, and let
+  // the next click try again. Never silently degrade mouse-look.
+  game.input1.onLockRefused = () => {
+    if (!game.running || game.over) return;
+    pauseGame();
+    hud.toast(0, 'CLICK TO RESUME');
+  };
 
   // --- target outlines
   // One silhouette per local player, created only once the players exist: it
@@ -654,6 +705,75 @@ function closeRoomScreen() {
 function setRoomError(text) {
   const el = roomEl('roomError');
   if (el) el.textContent = text || '';
+  el?.classList.remove('note');
+}
+
+/** Informational line in the same slot as errors, without the error styling. */
+function setRoomNote(text) {
+  const el = roomEl('roomError');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('note', Boolean(text));
+}
+
+function clearRoomError() {
+  setRoomError('');
+}
+
+/**
+ * Copy text using whichever mechanism this document actually allows.
+ *
+ * The async Clipboard API needs a secure context and a focused document; inside
+ * the launcher's app window (http://127.0.0.1) and in some embedded browsers it
+ * is unavailable or rejects. The old execCommand path still works in those
+ * cases, so it is tried second rather than being the reason we give up.
+ */
+function copyText(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      // Fire and forget: the fallback below covers a rejection, and the caller
+      // only needs a synchronous yes/no to choose which label to show.
+      navigator.clipboard.writeText(text).then(
+        () => {},
+        () => copyViaSelection(text)
+      );
+      return true;
+    }
+  } catch (_) { /* fall through */ }
+  return copyViaSelection(text);
+}
+
+/** Last-resort copy that works without any clipboard permission. */
+function copyViaSelection(text) {
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand && document.execCommand('copy');
+    area.remove();
+    return Boolean(ok);
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Put the visible room code in the selection so Ctrl+C is all that is left. */
+function selectRoomCode() {
+  const el = roomEl('roomCodeValue');
+  if (!el || !window.getSelection) return;
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (_) { /* selection is a nicety, not a requirement */ }
 }
 
 function updateRoomButtons() {
@@ -712,9 +832,15 @@ function renderLobby(state) {
     if (room.started) startBtn.disabled = true;
   }
   if (hint) {
-    hint.textContent = isHost
-      ? (count < 2 ? 'Share the code. Waiting for your friend to join.' : 'Your friend is in. Start when ready.')
-      : 'Waiting for the host to start the match.';
+    // `room.started` is set the moment the host presses start, on both sides.
+    // The hint has to know about it: without this the guest kept reading
+    // "Waiting for the host to start the match" underneath a match that had
+    // already begun, which looks exactly like a hang.
+    hint.textContent = room.started
+      ? 'Starting — loading the island…'
+      : isHost
+        ? (count < 2 ? 'Share the code. Waiting for your friend to join.' : 'Your friend is in. Start when ready.')
+        : 'Waiting for the host to start the match.';
   }
   updatePingLine();
 }
@@ -864,6 +990,28 @@ function endOnlineMatch(reason) {
   hud.toast(0, reason || 'MATCH OVER');
 }
 
+/**
+ * Tear down the online session, once.
+ *
+ * Both players leave the room, stop the lobby poll and ping timers, and drop the
+ * realtime channel before the session object is discarded — otherwise the
+ * background timers outlive the match they belong to.
+ */
+function leaveOnlineRoom() {
+  const sess = game.online;
+  game.online = null;
+  game.remoteInputs?.clear?.();
+  if (!sess) return;
+  try {
+    sess.leave?.();
+  } catch (_) { /* already gone */ }
+  room.session = null;
+  room.started = false;
+  room.connectedIds = null;
+  room.lastLobby = null;
+  room.el?.classList.remove('show');
+}
+
 /* ---------------------------------------------------------- online input */
 
 function pauseGame() {
@@ -890,6 +1038,12 @@ function quitToMenu() {
   game.running = false;
   game.paused = true;
   game.over = false;
+  // Leaving an online match has to close the room, or the other player is left
+  // staring at a frozen opponent and this client keeps a presence entry in a
+  // room it will never return to.
+  if (game.mode === 'online' && game.online) {
+    leaveOnlineRoom();
+  }
   resetViews();
   clearMatch();
   hud.root.classList.remove('show');
@@ -1026,7 +1180,10 @@ function simulateOnline(dt) {
 }
 
 function readLocalInput(f) {
-  const input = game.input1.poll();
+  if (f.assistFromPad) {
+    f.aimAssist = !!p1pad?.connected && !game.input1.mouseActive?.(1200);
+  }
+  const input = game.input1.poll(1 / 60);
   if (f.weapon.kind === 'sniper' && f.aimT > 0.5) {
     const k = 1 - f.aimT * 0.62;
     input.lookX *= k;
@@ -1079,7 +1236,14 @@ function simulate(dt) {
       continue;
     }
     game.spectate[i] = null;
-    const input = i === 0 ? game.input1.poll() : game.input2.poll(dt);
+    const input = i === 0 ? game.input1.poll(dt) : game.input2.poll(dt);
+    if (f.assistFromPad) {
+      // Only assist while the controller is the thing being used: if the player
+      // has a pad plugged in but is aiming with the mouse, help would be free
+      // accuracy they did not ask for.
+      const usingPad = !!p1pad?.connected && !game.input1.mouseActive?.(1200);
+      f.aimAssist = usingPad;
+    }
     // Zoomed snipers get proportionally slower look, or the reticle jumps.
     if (f.weapon.kind === 'sniper' && f.aimT > 0.5) {
       const k = 1 - f.aimT * 0.62;
@@ -1431,14 +1595,22 @@ $('btnOnline').addEventListener('click', (e) => {
   roomEl('btnStartOnline')?.addEventListener('click', startOnlineFromLobby);
   roomEl('btnRoomBack')?.addEventListener('click', closeRoomScreen);
   roomEl('btnCopyCode')?.addEventListener('click', async () => {
+    const btn = roomEl('btnCopyCode');
     const code = roomEl('roomCodeValue')?.textContent || '';
-    try {
-      await navigator.clipboard.writeText(code);
-      roomEl('btnCopyCode').textContent = 'COPIED';
-      setTimeout(() => { roomEl('btnCopyCode').textContent = 'COPY'; }, 1400);
-    } catch (_) {
-      setRoomError('COPY FAILED — READ THE CODE ALOUD');
+    clearRoomError();
+    if (copyText(code)) {
+      btn.textContent = 'COPIED';
+      setTimeout(() => { btn.textContent = 'COPY'; }, 1400);
+      return;
     }
+    // Clipboard access is denied on anything but a secure, focused document —
+    // and the launcher serves the game over plain http://127.0.0.1. Rather than
+    // tell the player their room code failed, select it so Ctrl+C works and say
+    // so once.
+    selectRoomCode();
+    btn.textContent = 'SELECTED';
+    setTimeout(() => { btn.textContent = 'COPY'; }, 1400);
+    setRoomNote('Press Ctrl+C to copy the code');
   });
 }
 

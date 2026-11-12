@@ -18,6 +18,11 @@ const _v2 = new THREE.Vector3();
 // Dedicated to the reticle test, which runs after the weapon code.
 const _c1 = new THREE.Vector3();
 const _c2 = new THREE.Vector3();
+// Scratch for the aim-assist cover test. It runs inside a loop over candidate
+// targets, so it must not share the vectors used by getEyePosition(); doing so
+// silently fed each candidate the previous candidate's eye position.
+const _aimEye = new THREE.Vector3();
+const _aimTarget = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
 function setLayersDeep(obj, layer) {
@@ -415,14 +420,24 @@ export class Fighter {
     let lookX = input.lookX || 0;
     let lookY = input.lookY || 0;
     if (this.aimAssist && ctx) {
-      const assist = this.computeAimAssist(ctx.fighters);
+      const assist = this.computeAimAssist(ctx.fighters, dt, ctx?.effects?.world);
       if (assist) {
-        // Applied locally: the input objects are owned by the input devices
-        // and must not be mutated, or a static object (a test, a replay) would
-        // keep the assist for ever.
+        // Sticky aim first: scale what the stick asked for, then add the pull.
+        // Both are applied locally — the input objects belong to the input
+        // devices and must not be mutated, or a static object (a test, a
+        // replay) would keep the assist for ever.
+        if (assist.slow < 1) {
+          lookX *= assist.slow;
+          lookY *= assist.slow;
+        }
         lookX += assist.x;
         lookY += assist.y;
+        this.aimAssistStrength = assist.centred;
+      } else {
+        this.aimAssistStrength = 0;
       }
+    } else {
+      this.aimAssistStrength = 0;
     }
 
     // look
@@ -624,6 +639,19 @@ export class Fighter {
     return best;
   }
 
+  /**
+   * Is there solid world geometry between this fighter's eye and `other`?
+   * Cheap enough to run per candidate per frame (the collider set is small),
+   * and it keeps the assist from helping through tree trunks.
+   */
+  _coverBetween(other, distance, world) {
+    if (!world) return false;
+    const eye = this.getEyePosition(_aimEye);
+    const target = _aimTarget.set(other.position.x, other.position.y + 1.2, other.position.z);
+    // Same margin as the reticle test: stop short of the body itself.
+    return world.blockedBetween(eye, target, Math.max(0.4, distance * 0.04));
+  }
+
   syncCamera() {
     if (!this.camera) return;
     const eye = EYE_HEIGHT - (this.crouching ? 0.30 : 0);
@@ -676,39 +704,93 @@ export class Fighter {
     }
   }
 
-  computeAimAssist(fighters) {
-    // Wider than a hair, narrower than a snap: only the cone right around the
-    // crosshair is helped.
-    const fovX = 0.16;           // ~9 deg: the outer edge of stick precision
-    const fovY = 0.10;
+  /**
+   * Controller aim assist.
+   *
+   * A stick has nowhere near the precision of a mouse: the whole useful range
+   * is about 60 degrees of travel with no fine control at the end, so hitting a
+   * torso-sized target at 30 m with thumbsticks alone is genuinely painful. The
+   * assist therefore does three things a mouse never needs, in order of how
+   * much they matter:
+   *
+   *   1. **Sticky aim** — the look input is scaled down while the reticle is
+   *      close to an enemy, so the crosshair slows as it crosses the target
+   *      instead of flying past it. This is the big one; it is why aiming feels
+   *      controllable rather than twitchy.
+   *   2. **Tolerance** — while slowing, the aim is also nudge-pulled toward the
+   *      target, increasingly so the closer it already is. The pull is capped
+   *      so it can never take over from the player.
+   *   3. **Target acquisition** — when aiming down sights, the cone is wider,
+   *      because that is where the player has deliberately committed to a shot.
+   *
+   * It never snaps, never tracks for the player and never fires. Every effect
+   * is bounded by MAX_PULL, and at rest the assist contributes nothing: a
+   * target dead centre does not move the camera at all.
+   */
+  computeAimAssist(fighters, dt = 1 / 60, world = null) {
+    // Cone around the crosshair that the assist looks inside. Aiming down
+    // sights widens it: the player has committed to the shot, so a little more
+    // help is fair, and it is the difference between hitting and whiffing with
+    // a stick at range.
+    const fovX = this.aiming ? 0.30 : 0.20;   // ~17 deg / ~11.5 deg
+    const fovY = this.aiming ? 0.20 : 0.13;
+    const maxRange = 55;
     let best = null;
     let bestScore = Infinity;
+
     for (const other of fighters) {
       if (other === this || !other.alive) continue;
       const dx = other.position.x - this.position.x;
       const dz = other.position.z - this.position.z;
       const d = Math.hypot(dx, dz);
-      if (d > 40 || d < 1.5) continue;
+      if (d > maxRange || d < 1.2) continue;
+
+      // Ignore anyone standing behind cover: the assist must never drag the
+      // crosshair onto a body the player cannot actually shoot. Same collider
+      // test the red reticle uses, so the two can never disagree.
+      if (world && this._coverBetween(other, d, world)) continue;
+
       const desiredYaw = Math.atan2(-dx, -dz);
       let dy = desiredYaw - this.yaw;
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       if (Math.abs(dy) > fovX) continue;
+
       const targetY = other.position.y + 1.2;
       const desiredPitch = Math.atan2(targetY - (this.position.y + EYE_HEIGHT), d);
       const dp = desiredPitch - this.pitch;
       if (Math.abs(dp) > fovY) continue;
+
+      // Prefer whoever is closest to the reticle; distance only breaks ties.
       const score = Math.abs(dy) * 1.4 + Math.abs(dp) + d * 0.004;
       if (score < bestScore) { bestScore = score; best = { dy, dp, d }; }
     }
     if (!best) return null;
-    // A constant, light pull applied every frame (input look is in radians per
-    // frame for the pad), scaled down as the target gets further away.
-    // Exponential damping of the error: it halves the miss over about a
-    // second and then levels off, leaving the last degree to the player.
-    const strength = this.aiming ? 0.022 : 0.012;
-    const falloff = Math.max(0.25, 1 - best.d / 45);
-    const k = strength * falloff;
-    return { x: -best.dy * k, y: -best.dp * k };
+
+    // How centred is the target, 0 at the cone edge to 1 dead centre.
+    const offX = Math.abs(best.dy) / fovX;
+    const offY = Math.abs(best.dp) / fovY;
+    const centred = 1 - Math.min(1, Math.max(offX, offY));
+
+    // Sticky aim: slow the look down near a target. 1 = no change, so this only
+    // ever reduces sensitivity, and only inside the cone.
+    const slowFloor = this.aiming ? 0.42 : 0.62;
+    const slow = 1 - (1 - slowFloor) * Math.pow(centred, 0.7);
+
+    // Pull: the rotation applied per second toward the target, converted to a
+    // per-frame look delta. Capped so it assists but never steers.
+    const pullRate = (this.aiming ? 2.6 : 1.5) * Math.pow(centred, 1.4);
+    const MAX_PULL = 0.0016;      // radians per frame, ~0.1 deg at 60 fps
+    const pullX = clamp(-best.dy * pullRate * dt, -MAX_PULL, MAX_PULL);
+    const pullY = clamp(-best.dp * pullRate * dt, -MAX_PULL, MAX_PULL);
+
+    return {
+      x: pullX,
+      y: pullY,
+      // Applied by the caller to the incoming look input.
+      slow,
+      centred,
+      distance: best.d,
+    };
   }
 
   getEyePosition(out = new THREE.Vector3()) {
