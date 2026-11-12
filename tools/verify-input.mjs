@@ -577,9 +577,27 @@ async function main() {
         'still waiting on the browser handle with INFINITE');
     });
 
-    check('the server is kept alive on idleness instead', () => {
-      assert.ok(/srv_wait_for_idle/.test(launcher), 'launcher must wait for idle');
+    check('the server is kept alive until the page says it is gone', () => {
+      assert.ok(/srv_wait_for_idle/.test(launcher), 'launcher must wait for the page');
       assert.ok(/srv_wait_for_idle/.test(server), 'and the server must implement it');
+    });
+
+    check('the open page can check in, and those check-ins are counted', () => {
+      assert.ok(/SRV_ALIVE_PATH/.test(server), 'a liveness endpoint must exist');
+      assert.ok(/beats\s*=\s*srv->beats\s*\+\s*1/.test(server), 'check-ins must be counted');
+      assert.ok(/SRV_ALIVE_TIMEOUT_MS/.test(server), 'silence must eventually end the session');
+    });
+
+    check('the page polls the liveness endpoint', () => {
+      const page = readFileSync(new URL('../src/net/heartbeat.js', import.meta.url), 'utf8');
+      assert.ok(/__aetheris\/alive/.test(page), 'the game must announce itself');
+      assert.ok(/setInterval/.test(page), 'and keep doing it while open');
+    });
+
+    check('a page that never polls still shuts down on idleness', () => {
+      // Old cached bundles predate the heartbeat; they must not pin a server
+      // open forever.
+      assert.ok(/quiet\s*>=\s*idle_ms/.test(server), 'idle fallback must remain');
     });
 
     check('requests are counted so idleness is measurable', () => {

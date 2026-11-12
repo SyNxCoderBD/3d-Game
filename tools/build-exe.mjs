@@ -84,6 +84,8 @@ async function verifyLocalServer(html) {
   await fsp.writeFile(page, html, 'utf8');
 
   const harness = path.join(tmp, 'harness.c');
+  // Mirrors WinMain's lifecycle: start serving, then wait for the page to stop
+  // checking in. Arguments let the test use short timings.
   await fsp.writeFile(harness, `
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,9 +95,12 @@ async function verifyLocalServer(html) {
 int main(int argc, char **argv) {
   local_server srv;
   if (!srv_start(&srv, argv[1])) { fprintf(stderr, "%s", srv.error); return 1; }
-  printf("%d", srv.port);
+  printf("%d\\n", srv.port);
   fflush(stdout);
-  sleep(20);
+  unsigned idle = (unsigned)atoi(argv[2]);
+  unsigned alive = (unsigned)atoi(argv[3]);
+  unsigned max = (unsigned)atoi(argv[4]);
+  srv_wait_for_idle(&srv, idle, alive, max);
   srv_stop(&srv);
   return 0;
 }
@@ -106,7 +111,9 @@ int main(int argc, char **argv) {
     stdio: 'pipe',
   });
 
-  const child = (await import('node:child_process')).spawn(bin, [page], { stdio: ['ignore', 'pipe', 'pipe'] });
+  /* Short timings so the test is quick: shut down 1.5 s after the page stops
+   * checking in, or 2 s after the last request for a page that never polls. */
+  const child = (await import('node:child_process')).spawn(bin, [page, '1500', '2000', '30000'], { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     const port = await new Promise((resolve, reject) => {
       let out = '';
@@ -133,14 +140,40 @@ int main(int argc, char **argv) {
      * forwards the URL to an existing instance and exits immediately. The old
      * launcher waited on that handle and stopped the server the moment it
      * signalled, so the real window opened onto a dead port and showed
-     * ERR_CONNECTION_REFUSED. The fix is to keep serving while requests keep
-     * arriving, which is what this exercises: stay quiet past one idle step and
-     * the port must still answer.
+     * ERR_CONNECTION_REFUSED.
+     *
+     * A loaded page can then go quiet for minutes and still be open, so
+     * silence is not a shutdown signal either. The page checks in while it is
+     * open, and this test plays that page: check in for several idle windows'
+     * worth of time and confirm the port stays up the whole way.
      */
-    await new Promise((r) => setTimeout(r, 1500));
-    const afterIdle = await fetch(`http://127.0.0.1:${port}/`).then((r) => r.status).catch(() => 0);
-    if (afterIdle !== 200) throw new Error(`server stopped after an idle gap (status ${afterIdle})`);
-    console.log('  survives an idle gap after spawn ✓');
+    const aliveUrl = `http://127.0.0.1:${port}/__aetheris/alive`;
+    const beat = () => fetch(aliveUrl, { cache: 'no-store' }).then((r) => r.ok).catch(() => false);
+
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (!(await beat())) throw new Error(`liveness check-in ${i + 1} failed — the page would lose its server`);
+    }
+    console.log('  stays up while the open page checks in ✓');
+
+    // And a reload mid-session must still land on a live port — this is the
+    // exact thing the player does after an error card.
+    const reload = await fetch(`http://127.0.0.1:${port}/`).then((r) => r.status).catch(() => 0);
+    if (reload !== 200) throw new Error(`a reload during play answered ${reload}`);
+
+    // Only when the page stops checking in does the launcher shut down.
+    const closed = await new Promise((resolve) => {
+      const deadline = Date.now() + 12000;
+      const poll = async () => {
+        const ok = await fetch(`http://127.0.0.1:${port}/`).then(() => true).catch(() => false);
+        if (!ok) return resolve(true);
+        if (Date.now() > deadline) return resolve(false);
+        setTimeout(poll, 250);
+      };
+      poll();
+    });
+    if (!closed) throw new Error('the server never shut down after the page closed');
+    console.log('  shuts down after the page goes away ✓');
   } finally {
     child.kill('SIGKILL');
     await fsp.rm(tmp, { recursive: true, force: true });

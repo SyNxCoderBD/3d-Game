@@ -22,6 +22,7 @@ import { Hud } from './ui/hud.js';
 import { Ambience } from './audio/ambience.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './net/net.js';
 import { fetchLatestRelease, runUpdateCheck, versionLabel } from './net/updater.js';
+import { startHeartbeat } from './net/heartbeat.js';
 import { BUILD_VERSION, mountMenuChrome } from './ui/menu-chrome.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1832,6 +1833,21 @@ window.__aetherisBooted = true;
  * complete in the background and be staged for the next launch without the
  * player ever waiting for it. It never blocks boot.
  */
+/*
+ * Tell the launcher this window is open, for as long as it is.
+ *
+ * The launcher serves the game over loopback and stops when the page is gone.
+ * It cannot use browser process exit for that (Chromium forwards the URL to an
+ * existing instance and the spawned process exits immediately, which is what
+ * produced ERR_CONNECTION_REFUSED), and it cannot use request traffic either
+ * (a loaded game can be quiet for minutes and then be reloaded). The check-ins
+ * this starts are the signal; when the tab closes they stop and the launcher
+ * shuts itself down shortly after.
+ *
+ * A no-op over file:// or the dev server, where there is no launcher.
+ */
+startHeartbeat();
+
 const menuChrome = mountMenuChrome({
   version: BUILD_VERSION,
   fetchReleases: () =>

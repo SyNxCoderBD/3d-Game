@@ -363,7 +363,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
       if (served) {
-        srv_wait_for_idle(&server, SRV_IDLE_SHUTDOWN_MS, SRV_MAX_UPTIME_MS);
+        srv_wait_for_idle(&server, SRV_IDLE_SHUTDOWN_MS,
+                         SRV_ALIVE_TIMEOUT_MS, SRV_MAX_UPTIME_MS);
         srv_stop(&server);
       }
       return 0;

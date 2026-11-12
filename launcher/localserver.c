@@ -59,6 +59,26 @@ typedef int sock_t;
 #define SRV_UPDATE_PATH "/__aetheris/staged"
 #define SRV_UPDATE_PATH_LEN 18
 
+/*
+ * The game page polls this while it is open.
+ *
+ * Anything that only listens while it happens to be receiving traffic will
+ * eventually be caught out: after the page has loaded, the player can sit in a
+ * menu for minutes, press F5, or sit in a match while an update downloads. All
+ * of those need the server up. So the page declares that it is still open, and
+ * the launcher only stops once that declaration stops.
+ */
+#define SRV_ALIVE_PATH "/__aetheris/alive"
+#define SRV_ALIVE_PATH_LEN 17
+/* How often the page checks in. */
+#define SRV_ALIVE_INTERVAL_MS 5000u
+/*
+ * How long a silent page is still considered open. Comfortably longer than the
+ * poll interval so a slow timer, a background tab that Chromium throttles, or a
+ * momentarily busy game loop cannot be mistaken for a closed window.
+ */
+#define SRV_ALIVE_TIMEOUT_MS 20000u
+
 /* Case-insensitive compare, spelled out so the same source builds under both
  * MSVC/MinGW and gcc/clang without pulling in non-standard headers. */
 static int _strnicmp_portable(const char *a, const char *b, size_t n) {
@@ -82,6 +102,7 @@ typedef struct {
   const char *staged_path; /* where POST /__aetheris/staged writes a new build */
   volatile int stop;
   volatile long requests;  /* incremented per served request; see srv_wait_for_idle */
+  volatile long beats;     /* liveness check-ins from the open page */
   char status[256];        /* outcome of the last staged upload */
   char error[256];
 } local_server;
@@ -323,6 +344,13 @@ static void srv_serve_one(local_server *srv, sock_t client) {
   int is_head = (n > 5 && strncmp(req, "HEAD ", 5) == 0);
   int is_post = (n > 5 && strncmp(req, "POST ", 5) == 0);
 
+  /* The open page checking in: proof the window still exists. */
+  if (is_get && n > 5 && strncmp(req + 4, SRV_ALIVE_PATH, SRV_ALIVE_PATH_LEN) == 0) {
+    srv->beats = srv->beats + 1;
+    srv_reply_text(client, 200, "alive");
+    return;
+  }
+
   /* Updates arrive here while the game is running, then the launcher promotes
    * them on the next start. Anything else keeps the plain read-only behaviour. */
   if (is_post && n > 5 && strncmp(req + 5, SRV_UPDATE_PATH, SRV_UPDATE_PATH_LEN) == 0) {
@@ -496,30 +524,64 @@ static int srv_start(local_server *srv, const char *path) {
  * ceiling so a launcher instance can never outlive its usefulness if the page
  * is left open and silent for a very long time.
  */
-static void srv_wait_for_idle(local_server *srv, unsigned idle_ms, unsigned max_ms) {
-  unsigned long seen = (unsigned long)srv->requests;
+static void srv_wait_for_idle(local_server *srv, unsigned idle_ms,
+                              unsigned alive_ms, unsigned max_ms) {
+  /*
+   * The page is what decides when this is over.
+   *
+   * Traffic alone is not a good signal: a player can load the game and then not
+   * make a request for ten minutes, and that window is still open. So the page
+   * checks in on SRV_ALIVE_PATH, and this loop distinguishes three phases:
+   *
+   *   1. nothing has been fetched yet  -> the browser is still starting up
+   *   2. the page has checked in       -> it is open; keep serving
+   *   3. the check-ins have stopped    -> the window is gone; we are done
+   *
+   * Phase 3 is what shuts the launcher down, with `alive_ms` of slack so a
+   * throttled background tab is not punished. `idle_ms` still applies as a
+   * fallback for a page that never polls (an older cached bundle), where a
+   * burst of requests followed by silence really does mean it is finished.
+   */
+  unsigned long reqs = (unsigned long)srv->requests;
+  unsigned long beats = (unsigned long)srv->beats;
   unsigned long waited = 0;
   unsigned long quiet = 0;
+  unsigned long since_beat = 0;
+  int saw_beat = 0;
   const unsigned step = 250;
 
   while (!srv->stop) {
     srv_sleep_ms(step);
     waited += step;
 
-    unsigned long now = (unsigned long)srv->requests;
-    if (now != seen) {
-      seen = now;
+    unsigned long now_reqs = (unsigned long)srv->requests;
+    unsigned long now_beats = (unsigned long)srv->beats;
+
+    if (now_reqs != reqs) {
+      reqs = now_reqs;
       quiet = 0;
     } else {
       quiet += step;
     }
 
-    /* Only start counting idle time once the page has been opened. A browser
-     * that is still starting — first run, cold profile, a slow disk — must
-     * never be timed out before it has asked for anything, so the pre-first-
-     * request allowance is deliberately long. */
-    if (seen > 0 && quiet >= idle_ms) break;
-    if (!seen && waited >= SRV_FIRST_REQUEST_GRACE_MS) break;
+    if (now_beats != beats) {
+      beats = now_beats;
+      saw_beat = 1;
+      since_beat = 0;
+    } else {
+      since_beat += step;
+    }
+
+    if (saw_beat) {
+      /* The page is open until it stops checking in. */
+      if (since_beat >= alive_ms) break;
+    } else {
+      /* No liveness support (older bundle): fall back to plain idleness, but
+       * never before the page has asked for anything at all. */
+      if (quiet >= idle_ms) break;
+      if (waited >= SRV_FIRST_REQUEST_GRACE_MS && reqs == 0) break;
+    }
+
     if (waited >= max_ms) break;
   }
 }

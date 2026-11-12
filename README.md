@@ -180,6 +180,20 @@ the whole game fits in roughly 630 KB of executable payload.
 
 ## Changelog
 
+### 1.5.2 — the open game keeps its own server alive
+- **Reloading the game, or downloading an update mid-session, could still hit
+  `ERR_CONNECTION_REFUSED`.** 1.5.1 stopped shutting the server down with the
+  browser process, but replaced that with "stop after a few idle seconds" —
+  which is fine for the first paint and wrong for everything after it. A loaded
+  game can sit in a menu, reload the page, or POST a downloaded build back to
+  the launcher, and all of those need the server up.
+- The page now checks in with the launcher every few seconds while it is open.
+  Check-ins stop when the tab closes, and the launcher shuts down shortly after.
+  A slower, throttled background tab is allowed for. A page too old to check in
+  still falls back to the idle timeout.
+- The build now proves the whole lifecycle against the real server: it stays up
+  while a page checks in, survives a reload, and shuts down once it stops.
+
 ### 1.5.1 — the launcher stopped before the window opened
 - **Fixed `ERR_CONNECTION_REFUSED at 127.0.0.1` when starting the exe.** The
   launcher started a local server, opened the browser at it, then waited for the

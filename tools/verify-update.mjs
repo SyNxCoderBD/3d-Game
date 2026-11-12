@@ -19,6 +19,7 @@ import {
   sha256Hex,
   runUpdateCheck,
 } from '../src/net/updater.js';
+import { startHeartbeat, HEARTBEAT_INTERVAL_MS } from '../src/net/heartbeat.js';
 
 const results = [];
 function check(name, ok, detail = '') {
@@ -318,6 +319,57 @@ async function main() {
     const el = { innerHTML: '' };
     renderChangelog([], '1.0.0', el);
     check('change log copes with no releases at all', el.innerHTML.includes('No releases'));
+  }
+
+  /* ------------------------------------------------------------ heartbeat */
+
+  /*
+   * The launcher only knows the game window is still open because the page
+   * says so. If this stops happening, the server shuts down mid-session and the
+   * player gets ERR_CONNECTION_REFUSED on reload — the original bug.
+   */
+  {
+    const calls = [];
+    const timers = [];
+    const hb = startHeartbeat({
+      location: { protocol: 'http:', hostname: '127.0.0.1', port: '5000', href: 'http://127.0.0.1:5000/' },
+      fetchImpl: (url, opts) => { calls.push({ url, opts }); return Promise.resolve({ ok: true }); },
+      setIntervalImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearIntervalImpl: (id) => { timers.splice(id - 1, 1); },
+    });
+
+    check('the page checks in immediately on boot', calls.length === 1);
+    check('it checks in on the launcher port, not somewhere else',
+      calls[0]?.url === 'http://127.0.0.1:5000/__aetheris/alive', calls[0]?.url);
+    check('the check-in is not cached by the browser', calls[0]?.opts?.cache === 'no-store');
+    check('repeats on a timer', timers.length === 1 && timers[0].ms === HEARTBEAT_INTERVAL_MS);
+
+    // The timer must actually fire more check-ins.
+    timers[0].fn();
+    check('the timer keeps the launcher informed', calls.length === 2);
+
+    hb.stop();
+    check('stopping clears the timer', timers.length === 0);
+
+    // A failed check-in must never throw into the game.
+    let threw = false;
+    try {
+      startHeartbeat({
+        location: { protocol: 'http:', hostname: '127.0.0.1', port: '5000', href: 'http://127.0.0.1:5000/' },
+        fetchImpl: () => { throw new Error('network is on fire'); },
+        setIntervalImpl: () => 1,
+        clearIntervalImpl: () => {},
+      });
+    } catch { threw = true; }
+    check('a failing check-in cannot break the game', !threw);
+
+    // file:// and the dev server have no launcher; nothing may be scheduled.
+    const none = startHeartbeat({
+      location: { protocol: 'file:', hostname: '', port: '', href: 'file:///C:/x/index.html' },
+      fetchImpl: () => { throw new Error('must not be called'); },
+      setIntervalImpl: () => { throw new Error('must not be called'); },
+    });
+    check('no heartbeat over file://', none.url === null);
   }
 
   /* -------------------------------------------------------------- hashing */
