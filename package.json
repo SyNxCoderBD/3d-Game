@@ -1,0 +1,22 @@
+{
+  "name": "aetheris",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AETHERIS \u2014 a high-fidelity first-person island explorer that ships as a single portable Windows executable.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:exe": "node tools/build-exe.mjs",
+    "verify": "node tools/verify-world.mjs",
+    "verify:shaders": "node tools/check-shaders.mjs"
+  },
+  "dependencies": {
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "@shaderfrog/glsl-parser": "^7.0.1",
+    "vite": "5.4.11"
+  }
+}
