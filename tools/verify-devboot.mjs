@@ -312,6 +312,63 @@ globalThis.__HarnessRenderer = Renderer;
 
 
 
+
+/* ------------------------------------------------- export/import coherence */
+/* A browser refuses to run the page when a named import is missing from its
+   target module. Vite's dev server serves files individually, so such a
+   mismatch only appears at runtime in the browser; check the whole graph
+   before booting anything. */
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+function exportedNames(src) {
+  const names = new Set();
+  for (const m of stripComments(src).matchAll(/export\s+(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/g)) {
+    names.add(m[1]);
+  }
+  for (const m of stripComments(src).matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const part of m[1].split(',')) {
+      const t = part.trim();
+      if (t) names.add(t.split(/\s+as\s+/).pop().trim());
+    }
+  }
+  if (/export\s+default/.test(src)) names.add('default');
+  return names;
+}
+
+async function checkGraph() {
+  const { readFile } = await import('node:fs/promises');
+  const bodies = new Map();
+  const walk = async (abs) => {
+    if (bodies.has(abs)) return;
+    let src;
+    try { src = await readFile(abs, 'utf8'); } catch { bodies.set(abs, null); return; }
+    bodies.set(abs, src);
+    for (const m of stripComments(src).matchAll(/import\s*\{[^}]*\}\s*from\s*["'](\.[^"']+)["']/g)) {
+      await walk(path.resolve(path.dirname(abs), m[1]));
+    }
+  };
+  await walk(path.join(MIRROR_ROOT, 'src/main.js'));
+
+  const missing = [];
+  for (const [abs, src] of bodies) {
+    if (!src) continue;
+    for (const m of stripComments(src).matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](\.[^"']+)["']/g)) {
+      const target = path.resolve(path.dirname(abs), m[2]);
+      const tsrc = bodies.get(target);
+      if (!tsrc) continue;
+      const have = exportedNames(tsrc);
+      for (const raw of m[1].split(',')) {
+        const name = raw.trim().split(/\s+as\s+/)[0].trim();
+        if (name && !have.has(name)) {
+          missing.push(`${path.relative(MIRROR_ROOT, abs)} needs {${name}} from ${path.relative(MIRROR_ROOT, target)}`);
+        }
+      }
+    }
+  }
+  return missing;
+}
+
 let MIRROR;
 try {
   MIRROR = await buildMirror();
@@ -319,7 +376,16 @@ try {
   console.log(`  … dev server not reachable at ${BASE} (${e.message}) — skipping dev boot check`);
   process.exit(0);
 }
-console.log('▸ importing dev source:', MIRROR);
+console.log('\u25b8 checking export/import coherence');
+const missing = await checkGraph();
+if (missing.length) {
+  console.log('  \u2717 broken named imports:', missing.length);
+  for (const m of missing.slice(0, 6)) console.log('     ', m);
+  process.exit(1);
+}
+console.log('  \u2713 every named import resolves against its module\'s exports');
+
+console.log('\u25b8 importing dev source:', MIRROR);
 try {
   await import(MIRROR);
 } catch (e) {

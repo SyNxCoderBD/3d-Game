@@ -646,7 +646,15 @@
                  '\n\nIf this is the dev server, reload the page. If it persists, the build is incomplete.');
           return;
         }
-        report(e.message || String(e.error || 'Unknown error'));
+        var msg = e.message || String(e.error || 'Unknown error');
+        // Module graphs disagreeing is almost always a half-cached page: this
+        // error means one file was newer than another when they met.
+        if (/does not provide an export named|does not export|Importing a module script failed/i.test(msg)) {
+          report('The game loaded a mixture of old and new files.\n\n' +
+                 'Press Ctrl+Shift+R (or Cmd+Shift+R) to reload everything from scratch.');
+          return;
+        }
+        report(msg);
       }, true);
       window.addEventListener('unhandledrejection', function (e) {
         var r = e.reason;
