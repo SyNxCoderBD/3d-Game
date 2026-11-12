@@ -45,13 +45,33 @@ typedef int sock_t;
 #define SRV_MAX_REQUEST 4096
 #define SRV_READ_TIMEOUT_SEC 3
 
+/* The one write endpoint this server has. */
+#define SRV_UPDATE_PATH "/__aetheris/staged"
+#define SRV_UPDATE_PATH_LEN 18
+
+/* Case-insensitive compare, spelled out so the same source builds under both
+ * MSVC/MinGW and gcc/clang without pulling in non-standard headers. */
+static int _strnicmp_portable(const char *a, const char *b, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    unsigned char ca = (unsigned char)a[i];
+    unsigned char cb = (unsigned char)b[i];
+    if (ca >= 'A' && ca <= 'Z') ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z') cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb) return (int)ca - (int)cb;
+    if (ca == 0) return 0;
+  }
+  return 0;
+}
+
 /* Shared with the accept thread. `path` is owned by the caller and must stay
  * valid for the lifetime of the server. */
 typedef struct {
   sock_t listen_sock;
   int port;
-  const char *path;   /* file to serve for every GET */
+  const char *path;        /* file to serve for every GET */
+  const char *staged_path; /* where POST /__aetheris/staged writes a new build */
   volatile int stop;
+  char status[256];        /* outcome of the last staged upload */
   char error[256];
 } local_server;
 
@@ -96,6 +116,177 @@ static char *srv_slurp(const char *path, size_t *out_len) {
   return buf;
 }
 
+/* Case-insensitive search for a header value in a raw request. */
+static int srv_header_value(const char *req, const char *name, char *out, size_t out_len) {
+  size_t name_len = strlen(name);
+  const char *p = req;
+  while ((p = strchr(p, '\n')) != NULL) {
+    p++;
+    if (_strnicmp_portable(p, name, name_len) == 0 && p[name_len] == ':') {
+      const char *v = p + name_len + 1;
+      while (*v == ' ' || *v == '\t') v++;
+      size_t i = 0;
+      while (*v && *v != '\r' && *v != '\n' && i + 1 < out_len) out[i++] = *v++;
+      out[i] = 0;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Write `data` to `path` atomically: a full temporary file first, then a
+ * rename. A crash or a full disk can therefore only ever leave the old build
+ * or the new one, never half of either.
+ */
+static int srv_replace_file(const char *path, const char *data, size_t len) {
+  char tmp[1024];
+  if (strlen(path) + 5 >= sizeof(tmp)) return 0;
+  snprintf(tmp, sizeof(tmp), "%s.part", path);
+
+  FILE *f = fopen(tmp, "wb");
+  if (!f) return 0;
+  size_t wrote = fwrite(data, 1, len, f);
+  if (fclose(f) != 0 || wrote != len) {
+    remove(tmp);
+    return 0;
+  }
+
+#ifdef _WIN32
+  /* MoveFileEx replaces the destination in one step. */
+  if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    remove(tmp);
+    return 0;
+  }
+#else
+  if (rename(tmp, path) != 0) {
+    remove(tmp);
+    return 0;
+  }
+#endif
+  return 1;
+}
+
+/* Read exactly `len` bytes from a socket. */
+static int srv_recv_exact(sock_t s, char *buf, size_t len);
+
+/* Small text response, shared by the update endpoints. */
+static void srv_reply_text(sock_t client, int code, const char *text) {
+  const char *reason = code == 200 ? "OK" : code == 400 ? "Bad Request" : "Internal Server Error";
+  char head[256];
+  int n = snprintf(head, sizeof(head),
+    "HTTP/1.1 %d %s\r\n"
+    "Content-Type: text/plain; charset=utf-8\r\n"
+    "Content-Length: %d\r\n"
+    "Cache-Control: no-store\r\n"
+    "Connection: close\r\n"
+    "\r\n",
+    code, reason, (int)strlen(text));
+  srv_send_all(client, head, (size_t)n);
+  srv_send_all(client, text, strlen(text));
+}
+
+/* Read exactly `len` bytes from a socket. */
+static int srv_recv_exact(sock_t s, char *buf, size_t len) {
+  size_t got = 0;
+  while (got < len) {
+    int n = recv(s, buf + got, (int)(len - got), 0);
+    if (n <= 0) return 0;
+    got += (size_t)n;
+  }
+  return 1;
+}
+
+/*
+ * POST /__aetheris/staged
+ *
+ * The running game has already downloaded and SHA-256-verified a newer build;
+ * this stores it so the next launch uses it. Deliberately narrow:
+ *   - only this exact path, only POST;
+ *   - only from a loopback Host header, so a web page on the internet cannot
+ *     aim a request at the player's update slot (the name needs no DNS rebinding
+ *     tricks because the port is ephemeral, but the check is free);
+ *   - size must match Content-Length and stay within a sane ceiling;
+ *   - the body must be a complete html document.
+ */
+#define SRV_MAX_UPDATE (8u * 1024u * 1024u)
+
+static void srv_handle_update(local_server *srv, sock_t client, const char *req, size_t req_len) {
+  if (!srv->staged_path) { srv_reply_text(client, 400, "not accepting updates"); return; }
+
+  char host[256];
+  if (srv_header_value(req, "Host", host, sizeof(host))) {
+    if (!(strncmp(host, "127.0.0.1", 9) == 0 || strncmp(host, "localhost", 9) == 0)) {
+      srv_reply_text(client, 400, "bad host");
+      return;
+    }
+  }
+
+  char len_buf[32];
+  if (!srv_header_value(req, "Content-Length", len_buf, sizeof(len_buf))) {
+    srv_reply_text(client, 400, "missing content-length");
+    return;
+  }
+  long long declared = atoll(len_buf);
+  if (declared <= 0 || (unsigned long long)declared > SRV_MAX_UPDATE) {
+    srv_reply_text(client, 400, "bad size");
+    return;
+  }
+
+  size_t len = (size_t)declared;
+  char *body = (char *)malloc(len + 1);
+  if (!body) { srv_reply_text(client, 500, "out of memory"); return; }
+
+  /* Some of the body usually arrives in the same packet as the headers, so
+   * drain what is already buffered before reading from the socket. */
+  size_t have = 0;
+  if (req_len > 4 && req_len < SRV_MAX_REQUEST) {
+    int is_post = (req_len > 5 && strncmp(req, "POST ", 5) == 0);
+    if (is_post) {
+      const char *sep = NULL;
+      for (size_t i = 0; i + 3 < req_len; i++) {
+        if (req[i] == '\r' && req[i+1] == '\n' && req[i+2] == '\r' && req[i+3] == '\n') {
+          sep = req + i + 4;
+          break;
+        }
+        if (req[i] == '\n' && req[i+1] == '\n') { sep = req + i + 2; break; }
+      }
+      if (sep) have = req_len - (size_t)(sep - req);
+    }
+  }
+  if (have > len) have = len;
+  if (have > 0) memcpy(body, req + (req_len - have), have);
+
+  if (have < len && !srv_recv_exact(client, body + have, len - have)) {
+    free(body);
+    srv_reply_text(client, 400, "short body");
+    return;
+  }
+  body[len] = 0;
+
+  /* A payload that is not a finished html document is not worth storing. */
+  int looks_html = 0;
+  for (size_t i = 0; i + 14 < len && i < 512; i++) {
+    if (_strnicmp_portable(body + i, "<!doctype html", 14) == 0) { looks_html = 1; break; }
+  }
+  if (!looks_html) {
+    free(body);
+    srv_reply_text(client, 400, "not an html build");
+    return;
+  }
+
+  int ok = srv_replace_file(srv->staged_path, body, len);
+  free(body);
+
+  if (!ok) {
+    snprintf(srv->status, sizeof(srv->status), "could not stage");
+    srv_reply_text(client, 500, "could not stage");
+    return;
+  }
+  snprintf(srv->status, sizeof(srv->status), "staged %lu bytes", (unsigned long)len);
+  srv_reply_text(client, 200, srv->status);
+}
+
 static void srv_serve_one(local_server *srv, sock_t client) {
   char req[SRV_MAX_REQUEST];
   int n = recv(client, req, sizeof(req) - 1, 0);
@@ -106,6 +297,14 @@ static void srv_serve_one(local_server *srv, sock_t client) {
    * clean answer rather than a dropped connection. */
   int is_get = (n > 4 && strncmp(req, "GET ", 4) == 0);
   int is_head = (n > 5 && strncmp(req, "HEAD ", 5) == 0);
+  int is_post = (n > 5 && strncmp(req, "POST ", 5) == 0);
+
+  /* Updates arrive here while the game is running, then the launcher promotes
+   * them on the next start. Anything else keeps the plain read-only behaviour. */
+  if (is_post && n > 5 && strncmp(req + 5, SRV_UPDATE_PATH, SRV_UPDATE_PATH_LEN) == 0) {
+    srv_handle_update(srv, client, req, (size_t)n);
+    return;
+  }
 
   if (!is_get && !is_head) {
     const char *body =
@@ -176,11 +375,14 @@ static void *srv_thread_main(void *arg) {
 
 /*
  * Bind to an ephemeral loopback port and start serving `path`.
+ * `staged_path` (may be NULL) enables POST /__aetheris/staged, which is how a
+ * running game hands a verified newer build to the next launch.
  * Returns 1 on success; on failure returns 0 and fills srv->error.
  */
-static int srv_start(local_server *srv, const char *path) {
+static int srv_start_ex(local_server *srv, const char *path, const char *staged_path) {
   memset(srv, 0, sizeof(*srv));
   srv->path = path;
+  srv->staged_path = staged_path;
   srv->listen_sock = BAD_SOCK;
 
 #ifdef _WIN32
@@ -250,6 +452,10 @@ static int srv_start(local_server *srv, const char *path) {
   pthread_detach(t);
 #endif
   return 1;
+}
+
+static int srv_start(local_server *srv, const char *path) {
+  return srv_start_ex(srv, path, NULL);
 }
 
 static void srv_stop(local_server *srv) {

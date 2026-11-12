@@ -20,6 +20,9 @@ import { WEAPONS } from './game/weapons.js';
 import { buildSpawnPoints, buildPickupSpots } from './game/spawns.js';
 import { Hud } from './ui/hud.js';
 import { Ambience } from './audio/ambience.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './net/net.js';
+import { fetchLatestRelease, runUpdateCheck, versionLabel } from './net/updater.js';
+import { BUILD_VERSION, mountMenuChrome } from './ui/menu-chrome.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1504,7 +1507,9 @@ window.addEventListener('resize', () => {
 });
 
 /* Dev handle: lets the automated harness drive match outcomes. Never active
-   in a normal launch (only with ?debug in the URL). */
+   in a normal launch (only with ?debug in the URL). Note that `menuChrome` is
+   read inside the accessor rather than captured, so the declaration below is
+   already initialised by the time anything calls it. */
 try {
   if (new URLSearchParams(window.location.search).has('debug')) {
     window.__aetheris = {
@@ -1517,6 +1522,11 @@ try {
       resumeGame,
       quitToMenu,
       get match() { return game.match; },
+      // Lets the harness read what the menu is showing without a real browser.
+      __menu: () => ({
+        version: menuChrome?.version ?? BUILD_VERSION,
+        label: versionLabel(menuChrome?.version ?? BUILD_VERSION),
+      }),
       // Lets the headless harness assert renderer/shadow configuration.
       __inspect: () => ({
         shadowAutoUpdate: renderer.shadowMap.autoUpdate,
@@ -1529,6 +1539,61 @@ try {
 } catch (_) { /* no location (headless) */ }
 
 window.__aetherisBooted = true;
+
+/*
+ * Version badge, change log and the background update check.
+ *
+ * The check is deliberately fired *before* the world finishes building: the
+ * menu is on screen long before anyone presses a button, so a download can
+ * complete in the background and be staged for the next launch without the
+ * player ever waiting for it. It never blocks boot.
+ */
+const menuChrome = mountMenuChrome({
+  version: BUILD_VERSION,
+  fetchReleases: () =>
+    fetchLatestRelease({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY })
+      .then((latest) => (latest ? [latest] : []))
+      // The changelog wants history, not just the newest row.
+      .then((rows) => fetchReleaseHistory(rows)),
+  onCheck: ({ setStatus }) => {
+    runUpdateCheck({
+      currentVersion: BUILD_VERSION,
+      supabaseUrl: SUPABASE_URL,
+      anonKey: SUPABASE_ANON_KEY,
+      onStatus: (state) => setStatus(state),
+    }).then((result) => {
+      if (result?.state === 'staged') {
+        console.info(`[update] ${result.latest.version} staged for next launch`);
+      }
+    }).catch(() => setStatus('offline'));
+  },
+});
+
+/**
+ * All published versions, newest first. Used by the change log panel; the
+ * update check only needs the newest one and does its own query.
+ */
+async function fetchReleaseHistory(fallbackRows) {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/aetheris_releases` +
+        '?select=version,notes,released_at,release_no&published=eq.true' +
+        '&order=release_no.desc&limit=25',
+      {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        cache: 'no-store',
+      }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length ? rows : fallbackRows;
+  } catch {
+    return fallbackRows;
+  }
+}
 
 buildWorld().then(() => {
   updatePadStatus();

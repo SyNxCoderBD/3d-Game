@@ -1,7 +1,19 @@
 import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
+
+/*
+ * The build stamps its own version into the bundle. Everything that needs to
+ * know "which build is this?" - the menu footer, the updater, the changelog's
+ * "you are here" marker - reads the same value, so they can never disagree,
+ * and a release can never be published claiming a version it is not.
+ */
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 export default defineConfig({
   base: './',
+  define: {
+    __AETHERIS_VERSION__: JSON.stringify(pkg.version),
+  },
   // Never let the browser keep a module from a previous run of the server.
   // Dev serves many small ES modules; if the browser holds an old copy of one
   // while fetching a fresh copy of another, the graph disagrees and the page

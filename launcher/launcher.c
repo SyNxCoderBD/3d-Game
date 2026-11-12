@@ -39,6 +39,105 @@ static BOOL write_all(HANDLE h, const char *buf, DWORD len) {
   return TRUE;
 }
 
+static BOOL file_exists_utf8(const char *path) {
+  wchar_t wide[1400];
+  if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, 1400) <= 0) return FALSE;
+  return file_exists(wide);
+}
+
+/*
+ * A newer build is downloaded by the running game (which can speak TLS and has
+ * already checked its hash) and written next to index.html as `next.html`.
+ * Promote it here, before any browser opens the file.
+ *
+ * Order matters: index.html is only replaced once next.html is complete, and
+ * next.html is only removed once index.html is in place. A power cut at any
+ * point leaves either the old build or the new one.
+ */
+static void promote_staged_build(const wchar_t *gameDir) {
+  wchar_t staged[1400], target[1400];
+  _snwprintf(staged, 1399, L"%s\\next.html", gameDir); staged[1399] = 0;
+  _snwprintf(target, 1399, L"%s\\index.html", gameDir); target[1399] = 0;
+
+  if (!file_exists(staged)) return;
+
+  /* An interrupted download would have been left as next.html.part and never
+   * promoted; a next.html that is not a finished document is discarded. */
+  HANDLE h = CreateFileW(staged, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, NULL);
+  BOOL usable = FALSE;
+  if (h != INVALID_HANDLE_VALUE) {
+    LARGE_INTEGER sz;
+    if (GetFileSizeEx(h, &sz) && sz.QuadPart > 65536) {
+      char head[64];
+      DWORD got = 0;
+      if (ReadFile(h, head, sizeof(head), &got, NULL) && got >= 15) {
+        for (DWORD i = 0; i + 14 < got; i++) {
+          if (_strnicmp_portable(head + i, "<!doctype html", 14) == 0) { usable = TRUE; break; }
+        }
+      }
+    }
+    CloseHandle(h);
+  }
+
+  if (!usable) {
+    DeleteFileW(staged);
+    return;
+  }
+
+  if (MoveFileExW(staged, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    /* Index is now the new build; the stale marker must not outlive it. */
+    wchar_t marker[1400];
+    _snwprintf(marker, 1399, L"%s\\next.ver", gameDir); marker[1399] = 0;
+    DeleteFileW(marker);
+  }
+}
+
+/*
+ * The build tool appends the payload and then the trailer, so the extracted
+ * file ends with 24 bytes of binary after `</html>`. Browsers ignore trailing
+ * bytes, but they are not part of the document: trim them so index.html is
+ * exactly the build that was hash-checked, and so a later re-read of the file
+ * does not have to know about the container format.
+ */
+static void trim_trailing_trailer(const wchar_t *path) {
+  HANDLE h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, NULL);
+  if (h == INVALID_HANDLE_VALUE) return;
+
+  LARGE_INTEGER sz;
+  if (!GetFileSizeEx(h, &sz) || sz.QuadPart < (LONGLONG)(MAGIC_LEN + 8)) {
+    CloseHandle(h);
+    return;
+  }
+
+  unsigned long long size = (unsigned long long)sz.QuadPart;
+  unsigned long long scan = size < 4096 ? size : 4096;
+  char tail[4096];
+  LARGE_INTEGER seek;
+  seek.QuadPart = (LONGLONG)(size - scan);
+  if (!SetFilePointerEx(h, seek, NULL, FILE_BEGIN)) { CloseHandle(h); return; }
+
+  DWORD got = 0;
+  if (!ReadFile(h, tail, (DWORD)scan, &got, NULL) || got == 0) { CloseHandle(h); return; }
+
+  long last_close = -1;
+  for (long i = (long)got - 7; i >= 0; i--) {
+    if (_strnicmp_portable(tail + i, "</html>", 7) == 0) { last_close = i; break; }
+  }
+  if (last_close < 0 || (unsigned long long)last_close + 7 >= size) {
+    CloseHandle(h);  /* no trailer, or nothing after it */
+    return;
+  }
+
+  LARGE_INTEGER cut;
+  cut.QuadPart = (LONGLONG)(size - scan + (unsigned long long)last_close + 7);
+  if (SetFilePointerEx(h, cut, NULL, FILE_BEGIN) && SetEndOfFile(h)) {
+    /* done */
+  }
+  CloseHandle(h);
+}
+
 /* Copy `size` bytes starting at `offset` of `src` into `dstPath`. */
 static BOOL extract_payload(HANDLE src, unsigned long long offset,
                             unsigned long long size, const wchar_t *dstPath) {
@@ -163,12 +262,17 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
   _snwprintf(htmlPath, 1399, L"%s\\index.html", gameDir);
   htmlPath[1399] = 0;
 
-  if (!extract_payload(src, payloadOffset, trailer.size, htmlPath)) {
+  /* A build staged by the last session becomes the build this session runs. */
+  promote_staged_build(gameDir);
+
+  if (!file_exists(htmlPath) && !extract_payload(src, payloadOffset, trailer.size, htmlPath)) {
     CloseHandle(src);
     MessageBoxW(NULL, L"Could not unpack the game to the temp folder.", L"AETHERIS", MB_ICONERROR);
     return 1;
   }
   CloseHandle(src);
+
+  trim_trailing_trailer(htmlPath);
 
   wchar_t profileDir[1400];
   _snwprintf(profileDir, 1399, L"%s\\profile", gameDir);
@@ -195,8 +299,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
   int haveUtf8 = WideCharToMultiByte(CP_UTF8, 0, htmlPathA, -1,
                                      htmlPathUtf8, sizeof(htmlPathUtf8), NULL, NULL) > 0;
 
+  /* The game posts verified newer builds here; the next start promotes them. */
+  wchar_t stagedPath[1400];
+  _snwprintf(stagedPath, 1399, L"%s\\next.html", gameDir); stagedPath[1399] = 0;
+  char stagedPathUtf8[1400];
+  int haveStagedUtf8 = WideCharToMultiByte(CP_UTF8, 0, stagedPath, -1,
+                                           stagedPathUtf8, sizeof(stagedPathUtf8), NULL, NULL) > 0;
+
   local_server server;
-  int served = haveUtf8 && srv_start(&server, htmlPathUtf8);
+  int served = haveUtf8 && srv_start_ex(&server, htmlPathUtf8,
+                                        haveStagedUtf8 ? stagedPathUtf8 : NULL);
 
   wchar_t url[1500];
   if (served) {

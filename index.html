@@ -159,6 +159,70 @@
   #padStatus { margin-top: 18px; font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; color: #ff8a7a; }
   #padStatus.ok { color: #7ef7e4; }
 
+  /* ------------------------------------------------------ version + changelog */
+  .menuFoot {
+    display: flex; align-items: center; justify-content: center;
+    gap: 14px; margin-top: 16px; flex-wrap: wrap;
+  }
+  .menuFoot .build {
+    font-size: 9.5px; letter-spacing: 0.3em; text-transform: uppercase;
+    color: #6f8479; font-variant-numeric: tabular-nums;
+  }
+  .menuFoot .build b { color: #a8c4b8; font-weight: 400; }
+  .menuFoot .linkbtn {
+    appearance: none; cursor: pointer; font-family: inherit;
+    background: transparent; color: #7d9388;
+    border: 1px solid rgba(125, 147, 136, 0.32); border-radius: 3px;
+    padding: 5px 12px; font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .menuFoot .linkbtn:hover { color: #d6f2ea; border-color: rgba(126, 247, 228, 0.55); }
+  #updateStatus {
+    width: 100%; text-align: center; margin-top: 2px;
+    font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase;
+    color: #7d9388; opacity: 0; transition: opacity 0.3s ease; min-height: 12px;
+  }
+  #updateStatus.show { opacity: 1; }
+  #updateStatus.ready { color: #7ef7e4; }
+
+  #changelog {
+    position: fixed; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center;
+    background: rgba(3, 7, 8, 0.82); backdrop-filter: blur(7px);
+    opacity: 0; visibility: hidden; transition: opacity 0.25s ease, visibility 0.25s;
+  }
+  #changelog.show { opacity: 1; visibility: visible; }
+  .clPanel {
+    width: min(620px, 92vw); max-height: 80vh; display: flex; flex-direction: column;
+    background: rgba(9, 16, 15, 0.94); border: 1px solid rgba(126, 247, 228, 0.24);
+    border-radius: 5px; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.72); padding: 24px 26px 18px;
+  }
+  .clPanel h2 {
+    margin: 0; font-size: 13px; letter-spacing: 0.42em; text-indent: 0.42em;
+    font-weight: 400; color: #eafaf4; text-align: center;
+  }
+  .clSub {
+    margin: 7px 0 16px; font-size: 8.5px; letter-spacing: 0.3em;
+    text-transform: uppercase; color: #6f8479; text-align: center;
+  }
+  #changelogBody { overflow-y: auto; padding-right: 6px; }
+  #changelogBody::-webkit-scrollbar { width: 6px; }
+  #changelogBody::-webkit-scrollbar-thumb { background: rgba(126, 247, 228, 0.22); border-radius: 3px; }
+  .clEntry { padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.055); }
+  .clEntry:last-child { border-bottom: none; }
+  .clHead { display: flex; align-items: baseline; gap: 12px; }
+  .clVer {
+    font-family: Georgia, serif; font-size: 17px; letter-spacing: 0.06em; color: #dff5ee;
+  }
+  .clDate { font-size: 8.5px; letter-spacing: 0.22em; color: #5f7268; }
+  .clBadge {
+    margin-left: auto; font-size: 7.5px; letter-spacing: 0.2em; color: #7ef7e4;
+    border: 1px solid rgba(126, 247, 228, 0.4); border-radius: 2px; padding: 2px 7px;
+  }
+  .clNotes { margin: 6px 0 0; font-size: 10.5px; line-height: 1.75; color: #9fb5ab; letter-spacing: 0.02em; }
+  .clEntry.current .clVer { color: #7ef7e4; }
+  .clEmpty { margin: 18px 0; text-align: center; font-size: 10px; letter-spacing: 0.2em; color: #6f8479; text-transform: uppercase; }
+  .clClose { margin: 16px auto 0; }
+
   /* ------------------------------------------------------------- HUD */
   #hudRoot { position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: 0; transition: opacity 0.5s ease; }
   #hudRoot.show { opacity: 1; }
@@ -522,6 +586,21 @@
       </div>
 
       <p id="padStatus">NO CONTROLLER — PLAYER 2 NEEDS ONE</p>
+
+      <div class="menuFoot">
+        <span class="build">BUILD <b id="menuVersion">—</b></span>
+        <button class="linkbtn" id="btnChangelog">Change log</button>
+        <span id="updateStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="changelog">
+    <div class="clPanel">
+      <h2>CHANGE LOG</h2>
+      <p class="clSub" id="changelogSub">Every released version, newest first</p>
+      <div id="changelogBody"></div>
+      <button class="ghostBtn clClose" id="btnChangelogClose">Back</button>
     </div>
   </div>
 
